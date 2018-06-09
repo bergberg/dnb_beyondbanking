@@ -35,22 +35,19 @@ write_fst(Lung_CNV_transposed,'../../data/intermediates/Lung_CNV_transposed.fst'
 ## mutation
 
 Lung_Mutation <- read_fst(files_fst$Lung_Mutation) %>% as_data_frame
-Lung_Mutation_transposed <- Lung_Mutation %>% rename(SampleID = Sample_ID) %>% 
-  gather(SampleID, value = Effect, starts_with("TCGA")) %>% select(Gene,Chr,Effect,SampleID) %>%
-  tidyr::unite(gene_chr, Gene,Chr) %>% 
+Lung_Mutation_transposed <- Lung_Mutation %>%
+  gather(SampleID, value = Effect, starts_with("TCGA")) %>% select(Gene,Chr,Effect,SampleID=Sample_ID) %>%
+  tidyr::unite(gene_chr, Gene,Chr) %>%
   distinct(SampleID, gene_chr,.keep_all=TRUE) %>% 
   spread(gene_chr,Effect) 
 write_fst(Lung_Mutation_transposed,'../../data/intermediates/Lung_Mutation_transposed.fst')
 
-## mutation
+## methylation
 
-Lung_Mutation <- read_fst(files_fst$Lung_Methylation) %>% as_data_frame
-Lung_Mutation_transposed <- Lung_Mutation %>% rename(SampleID = Sample_ID) %>% 
-  gather(SampleID, value = Effect, starts_with("TCGA")) %>% select(Gene,Chr,Effect,SampleID) %>%
-  tidyr::unite(gene_chr, Gene,Chr) %>% 
-  distinct(SampleID, gene_chr,.keep_all=TRUE) %>% 
-  spread(gene_chr,Effect) 
-write_fst(Lung_Mutation_transposed,'../../data/intermediates/Lung_Mutation_transposed.fst')
+Lung_Methylation <- read_fst(files_fst$Lung_Methylation) %>% as_data_frame
+Lung_Methylation_transposed <- Lung_Methylation %>% 
+  gather(SampleID, value = beta, starts_with("TCGA")) %>% select(Gene,Chr,Start,Stop, beta,SampleID) 
+write_fst(Lung_Methylation_transposed,'../../data/intermediates/Lung_Methylation_transposed.fst')
 
 
 

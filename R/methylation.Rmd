@@ -1,0 +1,16 @@
+---
+title: "Methylation"
+output: html_notebook
+---
+
+
+```{r}
+require(fst)
+require(dplyr)
+```
+
+```{r}
+Lung_CNV <- read_fst('../../data/intermediates/Lung_GeneExpression_normal.fst') %>% as_data_frame
+Lung_Methylation <- read_fst('../../data/intermediates/Lung_Methylation_transposed.fst') %>% as_data_frame
+```
+
