@@ -41,3 +41,16 @@ Lung_Mutation_transposed <- Lung_Mutation %>% rename(SampleID = Sample_ID) %>%
   distinct(SampleID, gene_chr,.keep_all=TRUE) %>% 
   spread(gene_chr,Effect) 
 write_fst(Lung_Mutation_transposed,'../../data/intermediates/Lung_Mutation_transposed.fst')
+
+## mutation
+
+Lung_Mutation <- read_fst(files_fst$Lung_Methylation) %>% as_data_frame
+Lung_Mutation_transposed <- Lung_Mutation %>% rename(SampleID = Sample_ID) %>% 
+  gather(SampleID, value = Effect, starts_with("TCGA")) %>% select(Gene,Chr,Effect,SampleID) %>%
+  tidyr::unite(gene_chr, Gene,Chr) %>% 
+  distinct(SampleID, gene_chr,.keep_all=TRUE) %>% 
+  spread(gene_chr,Effect) 
+write_fst(Lung_Mutation_transposed,'../../data/intermediates/Lung_Mutation_transposed.fst')
+
+
+
