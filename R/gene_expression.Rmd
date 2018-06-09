@@ -1,0 +1,64 @@
+---
+title: "Gene expression"
+author: "Pieter"
+date: "6/8/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+require(tidyverse)
+require(fst)
+require(xgboost)
+require(Matrix)
+files <- list.files('../data/Lung/', full.names = T, pattern = 'txt$')
+files <- set_names(files, str_replace(basename(files), '.txt',''))
+files_fst <- map(files,str_c,'.fst')
+```
+
+```{r}
+(Lung_GeneExpression_transposed <- read_fst(files_fst$Lung_GeneExpression, from = 1,to = 10000) %>% as_data_frame %>% 
+  gather(SampleID, value = gene_expression, starts_with("TCGA")) %>% select(Gene,gene_expression,SampleID) %>%
+   group_by(Gene, SampleID) %>% summarize_all(mean) %>% 
+  spread(Gene,gene_expression) )
+```
+
+
+```{r}
+(model_data <- right_join(read_fst(files_fst$Lung_Phenotype_Metadata) %>% select(SampleID, PatientID, Gender, Ethnicity, `Age At Diagnosis (Days)`, `Tumor Stage`, `Smoking Status`, `Karnofsky Score`, surv = `Vital Status`), Lung_GeneExpression_transposed) %>% drop_na)
+```
+
+
+```{r}
+set_names(model_data,str_replace_all(names(model_data),pattern = '[ ()-]' , '_')) -> model_data
+```
+
+
+```{r}
+msparse <- sparse.model.matrix(data = select(model_data, -ends_with("ID")), surv ~ .-1)
+```
+
+```{r}
+train <- runif(nrow(msparse))<0.8
+```
+
+```{r}
+txg <- xgboost(data=msparse[train,],label = model_data$surv[train]=="dead", nrounds = 10, verbose = 1, nthread =4,  max_depth = 5, eta = 0.1, objective = "binary:logistic")
+```
+
+```{r}
+pred <- predict(txg, msparse)
+```
+
+```{r}
+model_data <- model_data %>% mutate(pred = pred)
+```
+
+```{r}
+require(ROCR)
+roc <- prediction(pred,model_data$surv)
+perf <- performance(roc,"tpr","fpr")
+plot(perf)
+```
+
+
