@@ -57,6 +57,12 @@ head(Lung_GeneExpression)
 
 genexpr_mut <- inner_join(Lung_Mutation_Transposed, Lung_GeneExpression, by = "Sample_ID")
 
+#variation per column
+zero_var = which(apply(genexpr_mut[,-1], 2, sd)==0) + 1 
+gen_zero_var = genexpr_mut[,zero_var]
+genexpr_mut = genexpr_mut[,-zero_var]
+
+
 head(genexpr_mut)
 
 rm(Lung_GeneExpression)
@@ -66,24 +72,32 @@ rm(Lung_Mutation_Transposed)
 # correlation networks
 
 ```{r}
-require(sparsebn)
-smpl <- genexpr_mut[,sample(2:(ncol(genexpr_mut)), 1000)]
 
+
+require(sparsebn)
+smpl <- genexpr_mut[,sample(2:(ncol(genexpr_mut)), 10000)]
+head(smpl)
+
+
+golden_lambda = 5
  
 dat <- sparsebnUtils::sparsebnData(smpl, type ="continuous")
 nn <- sparsebnUtils::num.samples(dat) # number of samples in the dataset / equivalent to nrow(dat$data)
-lambdas <- sparsebnUtils::generate.lambdas(sqrt(nn), 0.001, lambdas.length = 100, scale = "linear")
 
+mut_columns <- str_subset(tbl_vars(smpl), '_mut$')
+geneexpr_columns <-str_subset(tbl_vars(smpl), '_gen$')
 
-
-
-mut_columns <- str_subset(tbl_vars(smpl), 'cnv$')
-geneexpr_columns <-str_subset(tbl_vars(smpl), 'geneexpr$')
-whitelist <- cross_df(list(cnv=cnv_columns,geneexpr=geneexpr_columns)) %>% as.matrix
+blacklist <- bind_rows(cross(list(a=mut_columns,b=mut_columns)),cross(list(a=geneexpr_columns,b=geneexpr_columns))) %>% as.matrix
+cov_expr_mut <- sparsebn::estimate.dag(dat, blacklist=blacklist, lambdas=golden_lambda)
 ```
 
 ```{r}
-cov_exprmut <- sparsebn::estimate.covariance(dat,lambdas=lambdas)
+cov_expr_mut
+
+
+g = graph_from_adjacency_matrix(cov_exprmut[[1]]>0, mode = 'directed')
+plot(g)
+
 ```
 
 
