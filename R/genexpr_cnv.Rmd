@@ -1,0 +1,56 @@
+---
+title: "gene expr - cnv"
+output: html_notebook
+---
+
+```{r setup}
+require(tidyverse)
+require(fst)
+require(furrr)
+```
+
+# join gene expr and cnv data
+
+```{r paged.print=TRUE}
+
+files <- list.files('../../data/Lung', full.names = T, pattern = 'txt$')
+files <- set_names(files, str_replace(basename(files), '.txt',''))
+files_fst <- map(files,str_c,'.fst')
+Lung_GeneExpression <- read_fst(files_fst$Lung_GeneExpression) %>% as_data_frame
+Lung_GeneExpression_transposed <- Lung_GeneExpression %>% 
+  gather(SampleID, value = gene_expression, starts_with("TCGA")) %>% select(Gene,Chr,gene_expression,SampleID) %>%
+  tidyr::unite(gene_chr, Gene,Chr) %>% 
+  distinct(SampleID, gene_chr,.keep_all=TRUE)
+Lung_CNV <- read_fst(files_fst$Lung_CNV) %>% as_data_frame
+Lung_CNV_transposed <- Lung_CNV %>% 
+  gather(SampleID, value = cnv, starts_with("TCGA")) %>% select(Gene,Chr,cnv,SampleID) %>%
+  tidyr::unite(gene_chr, Gene,Chr) %>% 
+  distinct(SampleID, gene_chr,.keep_all=TRUE)
+```
+
+```{r}
+genexpr_cnv <- 
+  inner_join(
+  select(Lung_CNV,Gene,Chr,starts_with('TCGA')),
+  select(Lung_GeneExpression,Gene,Chr,starts_with('TCGA')), by = c("Gene","Chr"), suffix = c('.cnv','.geneexpr'))
+
+# genexpr_cnv <- 
+  # mutate_at(genexpr_cnv, .vars=vars(starts_with("TCGA")), as.double)
+
+# write_fst(genexpr_cnv, '../../data/intermediates/genexpr_cnv_join.fst' )
+```
+
+# correlation networks
+
+```{r}
+dat <- sparsebnUtils::sparsebnData(select(genexpr_cnv,starts_with("TCGA-18")) %>% head(1000), type ="continuous")
+
+cnv_columns <- tbl_vars(genexpr_cnv)[str_detect(tbl_vars(genexpr_cnv), 'cnv$')]
+geneexpr_columns <- tbl_vars(genexpr_cnv)[str_detect(tbl_vars(genexpr_cnv), 'geneexpr$')]
+
+```
+
+```{r}
+sbn_exprcnv <- sparsebn::estimate.dag(dat, )
+```
+
