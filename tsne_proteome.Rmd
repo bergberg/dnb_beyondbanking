@@ -1,0 +1,98 @@
+---
+title: "explore data"
+author: "Pieter"
+date: "6/8/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+require(tidyverse)
+```
+
+```{r load data, include=FALSE}
+
+files <- list.files('../data/', full.names = T, pattern = 'txt')
+(data <- map(files,read_tsv, n_max = 100) %>% set_names(files))
+
+files <- list.files('../data/', full.names = T, pattern = 'txt')
+(data <- map(files[6:7],read_tsv) %>% set_names(files[6:7]))
+
+Lung_Phenotype_Metadata <- read_delim("~/data/data_backup/Lung_Phenotype_Metadata.txt", 
+    "\t", escape_double = FALSE, trim_ws = TRUE)
+
+Lung_Proteome <- read_delim("~/data/data_backup/Lung_Proteome.txt", 
+    "\t", escape_double = FALSE, trim_ws = TRUE)
+
+```
+
+```{r data prep, include=FALSE}
+
+# transpose proteome data to make one row per patient
+proteome <- Lung_Proteome %>%
+   gather(SampleID, value, starts_with('TCGA')) %>% 
+   spread(sample, value) 
+
+# join proteome with phenotype metadata
+test <- inner_join(proteome,
+                   Lung_Phenotype_Metadata, 
+                   by = "SampleID")
+
+```
+
+
+
+```{r correlation, include=FALSE}
+
+test <- replace_na(proteome, 0)
+
+prot_matrix <- as.matrix(proteome[,2:277])
+cor(prot_matrix, method = "pearson", use = "complete.obs")
+
+```
+
+```{r tsne, include=FALSE}
+install.packages("Rtsne")
+library(Rtsne)
+
+Lung_Proteome <- read_delim("~/data/data_backup/Lung_Proteome.txt", 
+    "\t", escape_double = FALSE, trim_ws = TRUE, n_max = 230)
+
+proteome <- Lung_Proteome %>%
+   gather(SampleID, value, starts_with('TCGA')) %>% 
+   spread(sample, value) 
+
+proteome <- proteome %>% 
+  mutate_at(.vars = -1,~if_else(is.na(.),-999,.))
+
+## Curating the database for analysis with both t-SNE and PCA
+Labels<-proteome$SampleID
+proteome$SampleID<-as.factor(proteome$SampleID)
+## for plotting
+colors = rainbow(length(unique(proteome$SampleID)))
+names(colors) = unique(proteome$SampleID)
+
+train<- as.matrix(proteome[,-1])
+## Executing the algorithm on curated data
+tsne <- Rtsne(train, dims = 2, perplexity=30, verbose=TRUE, max_iter = 500)
+exeTimeTsne<- system.time(Rtsne(train[,-1], dims = 2, perplexity=30, verbose=TRUE, max_iter = 500))
+
+## Plotting
+plot(tsne$Y, t='n', main="tsne")
+text(tsne$Y, labels=proteome$SampleID, col=colors[proteome$SampleID])
+
+plot(tsne$Y, t='n', main="tsne")
+text(tsne$Y, col=colors[proteome$SampleID])
+```
+
+
+
+
+
+
+
+
+
+
+
+
