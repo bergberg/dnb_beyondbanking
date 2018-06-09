@@ -12,7 +12,7 @@ require(xgboost)
 require(Matrix)
 require(furrr)
 plan(multiprocess)
-files <- list.files('Z:/startset/Lung/', full.names = T, pattern = 'txt$')
+files <- list.files('../../data/Lung', full.names = T, pattern = 'txt$')
 files <- set_names(files, str_replace(basename(files), '.txt',''))
 files_fst <- map(files,str_c,'.fst')
 ```
