@@ -1,6 +1,8 @@
 #
 #
 #
+
+
 library(data.table)
 library(dplyr)
 library(stringr)
@@ -62,7 +64,7 @@ df_CNV = df_CNV[!duplicated(df_CNV$Gene_Chr, fromLast = TRUE), ]
 
 # create variable df for patient
 df_CNV_count = df_CNV %>% select(-c(Gene, Chr, Gene_Chr)) %>% t() %>% as.data.table()
-colnames(df_CNV_count) = str_c(df_CNV$Gene_Chr)
+colnames(df_CNV_count) = str_c(df_CNV$Gene_Chr,"_CNV")
 rownames(df_CNV_count) = df_CNV %>% select(-c(Gene, Chr, Gene_Chr)) %>% colnames()
 
 #
