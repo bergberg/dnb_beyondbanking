@@ -1,6 +1,5 @@
 ---
 title: "Gene expression"
-author: "Pieter"
 date: "6/8/2018"
 output: html_document
 ---
@@ -11,18 +10,20 @@ require(tidyverse)
 require(fst)
 require(xgboost)
 require(Matrix)
+require(furrr)
+plan(multiprocess)
 files <- list.files('../../data/Lung/', full.names = T, pattern = 'txt$')
 files <- set_names(files, str_replace(basename(files), '.txt',''))
 files_fst <- map(files,str_c,'.fst')
 ```
 
 ```{r}
-(Lung_GeneExpression <- read_fst(files_fst$Lung_GeneExpression, from = 1,to = 10000))
+(Lung_GeneExpression <- read_fst(files_fst$Lung_GeneExpression) %>% as_data_frame)
 ```
 
 
 ```{r}
-(Lung_GeneExpression_transposed <- Lung_GeneExpression  %>% as_data_frame %>% 
+(Lung_GeneExpression_transposed <- Lung_GeneExpression %>% 
   gather(SampleID, value = gene_expression, starts_with("TCGA")) %>% select(Gene,Chr,gene_expression,SampleID) %>%
    tidyr::unite(gene_chr, Gene,Chr) %>% 
    distinct(SampleID, gene_chr,.keep_all=TRUE) %>% 

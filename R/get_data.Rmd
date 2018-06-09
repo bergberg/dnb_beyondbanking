@@ -14,7 +14,7 @@ require(tidyverse)
 files <- list.files('../../data/Lung/', full.names = T, pattern = 'txt$')
 files <- set_names(files, str_replace(basename(files), '.txt',''))
 files_fst <- map(files,str_c,'.fst')
-# walk2(files,files_fst,~fst::write_fst(read_tsv(..1),path=..2))
+walk2(files,files_fst,~fst::write_fst(read_tsv(..1),path=..2))
 # (data <- map(files_fst,fst::read_fst) %>% map(as_data_frame))
 ```
 
