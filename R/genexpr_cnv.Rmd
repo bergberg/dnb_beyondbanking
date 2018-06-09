@@ -7,6 +7,7 @@ output: html_notebook
 require(tidyverse)
 require(fst)
 require(furrr)
+plan(multiprocess)
 ```
 
 # join gene expr and cnv data
@@ -43,25 +44,34 @@ genexpr_cnv <-
 # correlation networks
 
 ```{r}
-smpl <- sample(str_subset(tbl_vars(genexpr_cnv), '^TCGA'), size = 1000, replace = F)
-genexpr_cnv_sel <- select(genexpr_cnv,smpl) 
-dat <- sparsebnUtils::sparsebnData(genexpr_cnv_sel, type ="continuous")
-nn <- sparsebnUtils::num.samples(dat) # number of samples in the dataset / equivalent to nrow(dat$data)
-lambdas <- sparsebnUtils::generate.lambdas(sqrt(nn), 0.001, lambdas.length = 100, scale = "linear")
+seq(from=100,to=1000,by=100) %>% 
+  map(~sample(str_subset(tbl_vars(genexpr_cnv), '^TCGA'), size = ., replace = F)) %>% 
+  map(~select(genexpr_cnv,.)) -> df_data
 
-cnv_columns <- str_subset(tbl_vars(genexpr_cnv_sel), 'cnv$')
-geneexpr_columns <-str_subset(tbl_vars(genexpr_cnv_sel), 'geneexpr$')
-whitelist <- cross_df(list(cnv=cnv_columns,geneexpr=geneexpr_columns)) %>% as.matrix
+future_map(df_data, sparsebnUtils::sparsebnData, type ="continuous") ->dat
+
+
+nn <- map_dbl(dat,sparsebnUtils::num.samples) # number of samples in the dataset / equivalent to nrow(dat$data)
+lambdas <- map(nn,~sparsebnUtils::generate.lambdas(sqrt(.), 0.001, lambdas.length = 10, scale = "linear"))
+
+cnv_columns <- map(df_data,~str_subset(tbl_vars(.), 'cnv$'))
+geneexpr_columns <-map(df_data,~str_subset(tbl_vars(.), 'geneexpr$'))
+blacklist <- map2(cnv_columns,geneexpr_columns,~bind_rows(cross(list(a=..1,b=..1)),cross(list(a=..2,b=..2)))) %>% map(as.matrix)
 ```
 
 ```{r}
-cov_exprcnv <- sparsebn::estimate.covariance(dat, whitelist=whitelist, lambdas=lambdas)
+cov_exprcnv <- future_pmap(list(dat,blacklist,lambdas),~sparsebn::estimate.covariance(..1, blacklist=..2, lambdas=..3))
 ```
 
 
 ```{r plot non-zero coefficients}
-data_frame(lambda=lambdas[-2:-1], 
-  fr_nonzero = cov_exprcnv %>% map(as.vector) %>% map(`>`,0) %>% map_dbl(mean)) %>% 
+map_df(cov_exprcnv,
+  ~data_frame(lambda=1:length(..1), 
+              fr_nonzero = map(..1,as.vector) %>% 
+                map(`>`,0) %>% 
+                map_dbl(mean))) -> fr_nonzero_data
+  
+  
   ggplot(aes(lambda,fr_nonzero)) + geom_line() + geom_smooth() + theme_minimal()
 
 
