@@ -11,34 +11,36 @@ require(tidyverse)
 require(fst)
 require(xgboost)
 require(Matrix)
-files <- list.files('../data/Lung/', full.names = T, pattern = 'txt$')
+files <- list.files('../../data/Lung/', full.names = T, pattern = 'txt$')
 files <- set_names(files, str_replace(basename(files), '.txt',''))
 files_fst <- map(files,str_c,'.fst')
 ```
 
 ```{r}
-(Lung_GeneExpression_transposed <- read_fst(files_fst$Lung_GeneExpression, from = 1,to = 10000) %>% as_data_frame %>% 
-  gather(SampleID, value = gene_expression, starts_with("TCGA")) %>% select(Gene,gene_expression,SampleID) %>%
-   group_by(Gene, SampleID) %>% summarize_all(mean) %>% 
-  spread(Gene,gene_expression) )
+(Lung_GeneExpression <- read_fst(files_fst$Lung_GeneExpression, from = 1,to = 10000))
 ```
 
+
+```{r}
+(Lung_GeneExpression_transposed <- Lung_GeneExpression  %>% as_data_frame %>% 
+  gather(SampleID, value = gene_expression, starts_with("TCGA")) %>% select(Gene,Chr,gene_expression,SampleID) %>%
+   tidyr::unite(gene_chr, Gene,Chr) %>% 
+   distinct(SampleID, gene_chr,.keep_all=TRUE) %>% 
+  spread(gene_chr,gene_expression) )
+```
+
+# Train xgboost on survival
 
 ```{r}
 (model_data <- right_join(read_fst(files_fst$Lung_Phenotype_Metadata) %>% select(SampleID, PatientID, Gender, Ethnicity, `Age At Diagnosis (Days)`, `Tumor Stage`, `Smoking Status`, `Karnofsky Score`, surv = `Vital Status`), Lung_GeneExpression_transposed) %>% drop_na)
 ```
 
-
 ```{r}
 set_names(model_data,str_replace_all(names(model_data),pattern = '[ ()-]' , '_')) -> model_data
 ```
 
-
 ```{r}
 msparse <- sparse.model.matrix(data = select(model_data, -ends_with("ID")), surv ~ .-1)
-```
-
-```{r}
 train <- runif(nrow(msparse))<0.8
 ```
 
@@ -61,4 +63,17 @@ perf <- performance(roc,"tpr","fpr")
 plot(perf)
 ```
 
+
+
+
+
+# Rtsne
+
+```{r}
+require(Rtsne)
+```
+
+```{r}
+tsne_out <- Rtsne(as.matrix(Lung_GeneExpression_transposed[,-1]))
+```
 
