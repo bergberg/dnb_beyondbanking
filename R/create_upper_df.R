@@ -9,7 +9,7 @@ library(stringr)
 # create df_mutation_count matrix
 
 
-df_mutation = read.csv("C:/BBhack/Lung/Lung_Mutation.txt", sep = "\t") %>% as.data.table
+df_mutation = read.csv("Downloads/Lung/Lung_Mutation.txt", sep = "\t") %>% as.data.table
 
 
 # create unique GENE_CHR combination 
@@ -54,7 +54,7 @@ sum(df_mutation_count)
 
 
 #  CNV 
-df_CNV = read.csv("C:/BBhack/Lung/Lung_CNV.txt", sep = "\t") %>% as.data.table
+df_CNV = read.csv("Downloads/Lung/Lung_CNV.txt", sep = "\t") %>% as.data.table
 df_CNV = df_CNV %>% select(-c(Start, Stop, Strand)) %>% as.data.table
 colnames(df_CNV) = gsub('\\.', '-', colnames(df_CNV))
 df_CNV$Gene_Chr = str_c(df_CNV$Gene, df_CNV$Chr)
@@ -76,16 +76,6 @@ df_mutation_count = add_rownames(df_mutation_count) %>% as.data.table
 
 # create joint dataframe 
 df_upper = inner_join(df_CNV_count, df_mutation_count, by = "rowname")
-
-sum(is.na(df_upper))
-
-
-rm(df_CNV, df_CNV_count, df_mutation, df_mutation_count)
-
-
-write.csv(df_upper, "")
-
-
 
 
 
