@@ -43,14 +43,28 @@ genexpr_cnv <-
 # correlation networks
 
 ```{r}
-dat <- sparsebnUtils::sparsebnData(select(genexpr_cnv,starts_with("TCGA-18")) %>% head(1000), type ="continuous")
+smpl <- sample(str_subset(tbl_vars(genexpr_cnv), '^TCGA'), size = 1000, replace = F)
+genexpr_cnv_sel <- select(genexpr_cnv,smpl) 
+dat <- sparsebnUtils::sparsebnData(genexpr_cnv_sel, type ="continuous")
+nn <- sparsebnUtils::num.samples(dat) # number of samples in the dataset / equivalent to nrow(dat$data)
+lambdas <- sparsebnUtils::generate.lambdas(sqrt(nn), 0.001, lambdas.length = 100, scale = "linear")
 
-cnv_columns <- tbl_vars(genexpr_cnv)[str_detect(tbl_vars(genexpr_cnv), 'cnv$')]
-geneexpr_columns <- tbl_vars(genexpr_cnv)[str_detect(tbl_vars(genexpr_cnv), 'geneexpr$')]
-
+cnv_columns <- str_subset(tbl_vars(genexpr_cnv_sel), 'cnv$')
+geneexpr_columns <-str_subset(tbl_vars(genexpr_cnv_sel), 'geneexpr$')
+whitelist <- cross_df(list(cnv=cnv_columns,geneexpr=geneexpr_columns)) %>% as.matrix
 ```
 
 ```{r}
-sbn_exprcnv <- sparsebn::estimate.dag(dat, )
+cov_exprcnv <- sparsebn::estimate.covariance(dat, whitelist=whitelist, lambdas=lambdas)
 ```
+
+
+```{r plot non-zero coefficients}
+data_frame(lambda=lambdas[-2:-1], 
+  fr_nonzero = cov_exprcnv %>% map(as.vector) %>% map(`>`,0) %>% map_dbl(mean)) %>% 
+  ggplot(aes(lambda,fr_nonzero)) + geom_line() + geom_smooth() + theme_minimal()
+
+
+```
+
 
