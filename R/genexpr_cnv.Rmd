@@ -44,7 +44,8 @@ genexpr_cnv <-
 # correlation networks
 
 ```{r}
-seq(from=100,to=1000,by=100) %>% 
+n_nodes <- seq(from=100,to=1000,by=100)
+n_nodes%>% 
   map(~sample(str_subset(tbl_vars(genexpr_cnv), '^TCGA'), size = ., replace = F)) %>% 
   map(~select(genexpr_cnv,.)) -> df_data
 
@@ -65,16 +66,35 @@ cov_exprcnv <- future_pmap(list(dat,blacklist,lambdas),~sparsebn::estimate.covar
 
 
 ```{r plot non-zero coefficients}
-map_df(cov_exprcnv,
-  ~data_frame(lambda=1:length(..1), 
+map2_df(cov_exprcnv,n_nodes,
+  ~data_frame(n_nodes = as.integer(..2),
+              lambda=1:length(..1), 
               fr_nonzero = map(..1,as.vector) %>% 
                 map(`>`,0) %>% 
-                map_dbl(mean))) -> fr_nonzero_data
+                map_dbl(mean))) %>% bind_rows-> fr_nonzero_data
   
   
-  ggplot(aes(lambda,fr_nonzero)) + geom_line() + geom_smooth() + theme_minimal()
+fr_nonzero_data %>% mutate(n_nodes=as.factor(n_nodes)) %>% ggplot(aes(lambda,fr_nonzero, color=n_nodes, group=n_nodes)) + geom_line() +  theme_minimal()
+```
+
+```{r}
+require(bench)
 
 
+golden_lambda <- 5
+
+bm <- future_map(seq(from=100,to=500,by=100), 
+      ~proc.time({
+        sample(str_subset(tbl_vars(genexpr_cnv), '^TCGA'), size = n_nodes, replace = F) %>% {select(genexpr_cnv,.)} -> df_data
+        
+        sparsebnUtils::sparsebnData(df_data, type ="cont") ->dat
+        
+        nn <- sparsebnUtils::num.samples(dat) # number of samples in the dataset / equivalent to nrow(dat$data)
+        cnv_columns <- str_subset(tbl_vars(df_data), 'cnv$')
+        geneexpr_columns <-str_subset(tbl_vars(df_data),  'geneexpr$')
+        blacklist <- bind_rows(cross(list(a=cnv_columns,b=cnv_columns)),cross(list(a=geneexpr_columns,b=geneexpr_columns))) %>% as.matrix
+        cov_exprcnv <- sparsebn::estimate.covariance(dat, blacklist=blacklist, lambdas=golden_lambda)
+      }))
 ```
 
 
