@@ -72,13 +72,38 @@ data_frame(lambda=lambdas[-1],
                 map_dbl(mean))-> fr_nonzero_data
   
   
-fr_nonzero_data %>% ggplot(aes(lambda,fr_nonzero)) + geom_line() +  theme_minimal()
+fr_nonzero_data %>% ggplot(aes(lambda,fr_nonzero)) + geom_line() + geom_point()+ theme_minimal()
 
 ```
 
 We're still going with lambda = 5.0
 
 ```{r}
-cov_exprcnv[which(lambda==5)]
+cov_exprcnv_picked <- cov_exprcnv[[which.min((lambdas-5)**2)]]
 ```
+
+```{r}
+saveRDS(cov_exprcnv_picked, '../../data/intermediates/cov_exprcnv.rds')
+write_fst(genexpr_cnv,'../../data/intermediates/genexpr_cnv.fst')
+```
+
+# Clustering
+
+```{r}
+
+```
+
+
+
+```{r}
+genexpr_cnv %>% group_by(SampleID) %>% nest %>% mutate(data=map(data, as.matrix))-> genexpr_cnv_nested
+iprd <- expand.grid(1:nrow(genexpr_cnv_nested),1:nrow(genexpr_cnv_nested))
+rw <- genexpr_cnv_nested$data
+
+# prd <- cross_df(genexpr_cnv_nested$data, genexpr_cnv_nested$data)
+m <- solve(cov_exprcnv_picked)
+dstnc <- map2_dbl(iprd[,1],iprd[,2],~tcrossprod( (rw[[..1]]-rw[[..2]]) %*% m, (rw[[..1]]-rw[[..2]])))
+
+```
+
 

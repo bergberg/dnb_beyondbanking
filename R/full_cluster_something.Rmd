@@ -1,0 +1,36 @@
+---
+title: "Full covariance matrix"
+output: html_notebook
+---
+
+```{r setup}
+
+```
+
+
+load cov matrices
+```{r}
+cov_cnvexpr <- readRDS('../../data/intermediates/cov_exprcnv.rds')
+cov_mutexpr <- readRDS('../../data/intermediates/cor_MUT.rds') 
+```
+
+
+Build full cov matr
+
+```{r}
+nl_mtr <- matrix(0,ncol=1000,nrow=1000)
+b <- cbind(nl_mtr, cov_mutexpr[[1]][1:1000,1001:2000])
+cov_full <- cbind(rbind(cov_mutexpr[[1]][1:1000,1:1000],t(b)), rbind(b,cov_cnvexpr))
+
+```
+
+Join data
+
+```{r}
+cnv_genexpr <- read_fst('../../data/intermediates/genexpr_cnv.fst')
+mut_genexpr <- readRDS('../../data/intermediates/Lung_Mutation_1000.rds')
+data_full <- inner_join(mut_genexpr,cnv_genexpr, by = "SampleID")
+```
+
+
+
