@@ -109,7 +109,7 @@ Lung_Methylation_Avg_t <- Lung_Methylation_Avg %>%
 
 head(Lung_Methylation_Avg_t)
 
-write_fst(Lung_Methylation_Avg_t, "C:/Users/Robert/Documents/data/intermediates/Lung_Methylation_Transposed.fst")
+write_fst(Lung_Methylation_Avg_t, "../../data/intermediates/intermediates/Lung_Methylation_Transposed.fst")
 
 
 ``` 
@@ -121,13 +121,23 @@ write_fst(Lung_Methylation_Avg_t, "C:/Users/Robert/Documents/data/intermediates/
 # create top1000 data frames and graphs between DNA layers (CNV, Mutation, Methylation) and RNA layer (Gene expression)
 
 ```{r paged.print=TRUE}
+files <- list.files('../../data/Lung', full.names = T, pattern = 'txt$')
+files <- set_names(files, str_replace(basename(files), '.txt',''))
+files_fst <- map(files,str_c,'.fst')
+#
+Lung_GeneExpression <- read_fst(files_fst$Lung_GeneExpression) %>% as_data_frame %>% 
+  gather(SampleID, value = gene_expression, starts_with("TCGA")) %>% select(Gene,Chr,gene_expression,SampleID) %>%
+  tidyr::unite(gene_chr, Gene,Chr) %>% 
+  distinct(SampleID, gene_chr,.keep_all = TRUE) %>% 
+  spread(gene_chr,gene_expression) 
 
-Lung_GeneExpression <- read_fst("../../data/intermediates/Lung_GeneExpression_normal.fst") %>% as_data_frame
-Lung_Mutation <- read_fst("../../data/startset/Lung_Mutation.txt.fst") %>% as_data_frame
+
 Lung_Methylation <- read_fst("../../data/intermediates/Lung_Methylation_Transposed.fst") %>% as_data_frame
 
 #Lung_CNV <- read_fst("../../data/intermediates/Lung_CNV_Transposed.fst") %>% as_data_frame
 #Lung_miRNA <- read_fst("../../data/startset/Lung_miRNA.txt.fst") %>% as_data_frame
+
+Lung_Mutation <- read_fst("../../data/startset/Lung_Mutation.txt.fst") %>% as_data_frame
 
 
 
@@ -204,12 +214,12 @@ cov_expr_methyl <-
 
 saveRDS(
   cor_expr_methyl,
-  file="C:/Users/Robert/Documents/data/cor_expr_methyl.rds"
+  file= "../../data/intermediates/cor_expr_methyl.rds"
 )
 
 saveRDS(
   Lung_Methylation_1000, 
-  file="C:/Users/Robert/Documents/data/Lung_Methylation_1000.rds"
+  file="../../data/intermediates/Lung_Methylation_1000.rds"
 )
 
 
@@ -233,15 +243,13 @@ cov_expr_mut <-
 
 saveRDS(
   cor_expr_mut,
-  file="C:/Users/Robert/Documents/data/cor_expr_mut.rds"
+  file="../../data/intermediates/cor_expr_mut.rds"
 )
 
 saveRDS(
   Lung_Mutation_1000, 
-  file="C:/Users/Robert/Documents/data/Lung_Mutation_1000.rds"
+  file="../../data/intermediates/Lung_Mutation_1000.rds"
 )
-
-
 ```
 
 
@@ -263,54 +271,13 @@ cov_expr_cnv <-
 
 saveRDS(
   cor_expr_cnv,
-  file="C:/Users/Robert/Documents/data/cor_expr_cnv.rds"
+  file="../../data/intermediates/cor_expr_cnv.rds"
 )
 
 saveRDS(
   Lung_CNV_1000, 
-  file="C:/Users/Robert/Documents/data/Lung_CNV_1000.rds"
+  file="../../data/intermediates/Lung_CNV_1000.rds"
 )
 
 
 ```
-
-
-
-
-
-<!-- # correlation networks -->
-
-<!-- ```{r} -->
-
-
-
-
-
-<!-- golden_lambda = 5 -->
-
-<!-- dat <- sparsebnUtils::sparsebnData(df_data[,-1], type ="continuous") -->
-<!-- nn <- sparsebnUtils::num.samples(dat) # number of samples in the dataset / equivalent to nrow(dat$data) -->
-
-
-<!-- blacklist <-  -->
-<!--   rbind( -->
-<!--     expand.grid(1:1000,1:1000), -->
-<!--     expand.grid(1001:2000,1001:2000) -->
-<!--   ) %>% as.matrix -->
-<!-- cov_expr_mut <- sparsebn::estimate.covariance(dat, blacklist=blacklist, lambdas=golden_lambda) -->
-<!-- ``` -->
-
-<!-- ```{r} -->
-
-
-
-<!-- cor_MYT = cov_expr_mut -->
-<!-- saveRDS(cor_MYT,file="C:/Users/Robert/Documents/data/cor_MYT.rds") -->
-<!-- saveRDS(Lung_Methylation_1000, file="C:/Users/Robert/Documents/data/Lung_Methylation_1000.rds") -->
-
-
-
-
-<!-- ``` -->
-
-
