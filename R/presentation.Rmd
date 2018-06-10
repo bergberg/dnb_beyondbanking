@@ -1,0 +1,35 @@
+---
+title: A sparse Bayesian covariance metric for clustering multi-omic data with t-distributed
+  stochastic neighbor embeddings
+author: "DNB Data Science"
+date: "6/10/2018"
+output: 
+  revealjs::revealjs_presentation:
+    theme: white
+    center: true
+    
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 99 Problems
+ 
+ * lung cancer
+ * treatment effectiveness?
+ * complex data
+ 
+## Data
+ 
+  * genomic (DNA)
+  * transcriptomic (RNA)
+  * (proteimoic)
+  * clinical (treatments outcomes)
+  
+## 99 + 1 Problems
+  
+   * complex data
+   * #features $\gg$ #observations
+   * clinical data not sufficient
+   
