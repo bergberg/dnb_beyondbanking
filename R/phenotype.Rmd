@@ -1,0 +1,134 @@
+---
+title: "Phenotype"
+author: "Corlene"
+date: "June 10, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# cluster phenotype
+
+```{r cluster}
+
+# data preparation
+mydata <- pheno_clust
+
+# choose k
+wss <- (nrow(mydata)-1)*sum(apply(mydata,2,var))
+  for (i in 2:15) wss[i] <- sum(kmeans(mydata,
+                                       centers=i)$withinss)
+plot(1:15, wss, type="b", xlab="Number of Clusters",
+     ylab="Within groups sum of squares")
+
+
+
+```
+
+
+# kaplan-meier curve
+
+```{r kaplan-meier curves, echo=FALSE}
+
+pheno_subset <- pheno_subset %>% 
+  rename(time_to_overall_survival_days = `Time To Overall Survival (Days)`,
+         overall_survival_status = `Overall Survival Status`,
+         age_at_diagnosis = `Age At Diagnosis (Years)`,
+         new_tumor_event = `New Tumor Event`,
+         new_tumor_event_type = `New Tumor Event Type`) %>% 
+# ****************************************************************************************** treatment should also include radiation theraphy
+  mutate(treatment = `Drug Therapy Type`,
+         treatment_factor = treatment,
+         gender_factor = Gender,
+         diagnosis_factor = Diagnosis, 
+# ****************************************************************************************** is 50 the correct age here?  
+         age_group = ifelse(age_at_diagnosis >=50, "old", "young")) # dichotomize continuous to binary values
+
+# factorise variables
+pheno_subset <- pheno_subset %>% 
+  mutate_at(.vars = c("age_group", "treatment_factor", "gender_factor", "new_tumor_event", "new_tumor_event_type"), as.factor)
+
+## response variable 
+# Time To Overall Survival (Days): Time to death or censoring time from diagnosis
+
+# create a survival object
+surv_object <- Surv(time = pheno_subset$time_to_overall_survival_days, 
+                    event = pheno_subset$overall_survival_status)
+
+# fit the Kaplan-Meier curves
+fit1 <- survfit(surv_object ~ treatment, data = pheno_subset)
+summary(fit1)
+
+# plot the survival curve, including the p-value of a log rank test
+ggsurvplot(fit1, data = pheno_subset, pval = TRUE)
+
+```
+
+# hazard ratio
+
+
+```{r hazard ratio, echo=FALSE}
+
+# Fit a Cox proportional hazards model
+fit.coxph <- coxph(surv_object ~ gender_factor + diagnosis_factor + age_group + new_tumor_event_type, 
+                   data = pheno_subset)
+hazard_ratio <- ggforest(fit.coxph, data = pheno_subset)
+hazard_ratio
+
+```
+
+
+# age histogram 
+
+```{r histogram, echo=FALSE} 
+
+hist(pheno_subset$age_at_diagnosis)
+
+```
+
+# plot diagnosis vs survival time 
+
+```{r plot, echo=FALSE}
+
+ggplot(data = pheno_subset) + 
+  geom_smooth(mapping = aes(x = time_to_overall_survival_days, y = age_at_diagnosis, colour = `Diagnosis`))
+
+```
+
+# plot diagnosis vs survival time 
+
+```{r plot, echo=FALSE}
+
+ggplot(data = pheno_subset) + 
+  geom_smooth(mapping = aes(x = time_to_overall_survival_days, y = age_at_diagnosis, colour = `Diagnosis`))
+
+```
+
+
+
+
+```{r plot, echo=FALSE}
+
+test <- pheno_clust %>% 
+  filter(! is.na(`Tumor Location`))
+
+test %>% 
+  ggplot(aes(Y1,Y2))+geom_point(aes(color=as.factor(`Tumor Location`)))
+
+pheno_clust %>% 
+  ggplot(aes(Y1,Y2))+geom_point(aes(color=as.factor(`Cancer Status After Resection`)))
+
+pheno_clust %>% 
+  ggplot(aes(Y1,Y2))+geom_point(aes(color=as.factor(`Histological Type`)))
+
+```
+
+
+
+
+
+
+
+
