@@ -18,7 +18,7 @@ Lung_GeneExpression <- read_fst(files_fst$Lung_GeneExpression) %>% as_data_frame
 Lung_GeneExpression_transposed <- Lung_GeneExpression %>% 
   gather(SampleID, value = gene_expression, starts_with("TCGA")) %>% select(Gene,Chr,gene_expression,SampleID) %>%
   tidyr::unite(gene_chr, Gene,Chr) %>% 
-  distinct(SampleID, gene_chr,.keep_all=TRUE) %>% Lung_Mutation
+  distinct(SampleID, gene_chr,.keep_all=TRUE) %>% 
   spread(gene_chr,gene_expression) 
 write_fst(Lung_GeneExpression_transposed,'../../data/intermediates/Lung_GeneExpression_normal.fst')
 
