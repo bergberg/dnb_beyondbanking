@@ -12,28 +12,34 @@ plan(multiprocess)
 
 # join gene expr and cnv data
 
-```{r paged.print=TRUE}
+Load the prepared (see unmangle_data.R) data sets for CNV + gene expression data.
 
-files <- list.files('../../data/Lung', full.names = T, pattern = 'txt$')
-files <- set_names(files, str_replace(basename(files), '.txt',''))
-files_fst <- map(files,str_c,'.fst')
-Lung_GeneExpression <- read_fst(files_fst$Lung_GeneExpression) %>% as_data_frame
-Lung_GeneExpression_transposed <- Lung_GeneExpression %>% 
-  gather(SampleID, value = gene_expression, starts_with("TCGA")) %>% select(Gene,Chr,gene_expression,SampleID) %>%
-  tidyr::unite(gene_chr, Gene,Chr) %>% 
-  distinct(SampleID, gene_chr,.keep_all=TRUE)
-Lung_CNV <- read_fst(files_fst$Lung_CNV) %>% as_data_frame
-Lung_CNV_transposed <- Lung_CNV %>% 
-  gather(SampleID, value = cnv, starts_with("TCGA")) %>% select(Gene,Chr,cnv,SampleID) %>%
-  tidyr::unite(gene_chr, Gene,Chr) %>% 
-  distinct(SampleID, gene_chr,.keep_all=TRUE)
+```{r paged.print=TRUE}
+Lung_GeneExpression <- read_fst("../../data/intermediates/Lung_GeneExpression_normal.fst") %>% as_data_frame
+Lung_CNV <- read_fst("../../data/intermediates/Lung_CNV_transposed.fst") %>% as_data_frame
+
 ```
+
+The full covariance matrix is too large - select the 1000 variables with highest std deviation for each data set.
+
+```{r}
+Lung_CNV[,-1] %>% 
+  apply(MARGIN = 2,FUN = sd) -> cnv_vars
+Lung_GeneExpression[,-1] %>% 
+  apply(MARGIN = 2,FUN = sd) -> expr_vars
+```
+```{r}
+cnv_vars_sel <- names(sort(cnv_vars,decreasing = T)[1:1000])
+expr_vars_sel <- names(sort(expr_vars,decreasing = T)[1:1000])
+```
+
+Join the resulting subsets, where the cnv data is in .cnv and the gene expr in .geneexpr named variables.
 
 ```{r}
 genexpr_cnv <- 
   inner_join(
-  select(Lung_CNV,Gene,Chr,starts_with('TCGA')),
-  select(Lung_GeneExpression,Gene,Chr,starts_with('TCGA')), by = c("Gene","Chr"), suffix = c('.cnv','.geneexpr'))
+  select(Lung_CNV,SampleID,cnv_vars_sel) %>% rename_at(cnv_vars_sel, .funs = str_c,'.cnv'),
+  select(Lung_GeneExpression,SampleID,expr_vars_sel) %>% rename_at(expr_vars_sel, .funs = str_c,'.geneexpr'), by = c("SampleID"))
 
 # genexpr_cnv <- 
   # mutate_at(genexpr_cnv, .vars=vars(starts_with("TCGA")), as.double)
@@ -43,58 +49,36 @@ genexpr_cnv <-
 
 # correlation networks
 
-```{r}
-n_nodes <- seq(from=100,to=1000,by=100)
-n_nodes%>% 
-  map(~sample(str_subset(tbl_vars(genexpr_cnv), '^TCGA'), size = ., replace = F)) %>% 
-  map(~select(genexpr_cnv,.)) -> df_data
-
-future_map(df_data, sparsebnUtils::sparsebnData, type ="continuous") ->dat
-
-
-nn <- map_dbl(dat,sparsebnUtils::num.samples) # number of samples in the dataset / equivalent to nrow(dat$data)
-lambdas <- map(nn,~sparsebnUtils::generate.lambdas(sqrt(.), 0.001, lambdas.length = 10, scale = "linear"))
-
-cnv_columns <- map(df_data,~str_subset(tbl_vars(.), 'cnv$'))
-geneexpr_columns <-map(df_data,~str_subset(tbl_vars(.), 'geneexpr$'))
-blacklist <- map2(cnv_columns,geneexpr_columns,~bind_rows(cross(list(a=..1,b=..1)),cross(list(a=..2,b=..2)))) %>% map(as.matrix)
-```
+First calculate the correlation matrices on the full sample of variables (i.e. cnv / gene expr) for a range of lambda values AND get some idea of reasonable values for lambda.
 
 ```{r}
-cov_exprcnv <- future_pmap(list(dat,blacklist,lambdas),~sparsebn::estimate.covariance(..1, blacklist=..2, lambdas=..3))
+df_data <- genexpr_cnv[,-1]
+sparsebnUtils::sparsebnData(df_data, type ="cont") ->dat
+nn <- sparsebnUtils::num.samples(dat) # number of samples in the dataset / equivalent to nrow(dat$data)
+cnv_columns <- str_which(tbl_vars(df_data), 'cnv$')
+geneexpr_columns <-str_which(tbl_vars(df_data),  'geneexpr$')
+blacklist <- rbind(expand.grid(cnv_columns,cnv_columns),expand.grid(geneexpr_columns,geneexpr_columns)) %>% as.matrix
+lambdas <- sparsebnUtils::generate.lambdas(sqrt(nn), 0.001, lambdas.length = 20, scale = "linear")
+
+cov_exprcnv <- sparsebn::estimate.covariance(dat, blacklist=blacklist, lambdas=lambdas)      
 ```
 
+Now plot lambda versus the fraction of non-zero coefficients:
 
-```{r plot non-zero coefficients}
-map2_df(cov_exprcnv,n_nodes,
-  ~data_frame(n_nodes = as.integer(..2),
-              lambda=1:length(..1), 
-              fr_nonzero = map(..1,as.vector) %>% 
+```{r}
+data_frame(lambda=lambdas[-1], 
+              fr_nonzero = map(cov_exprcnv,as.vector) %>% 
                 map(`>`,0) %>% 
-                map_dbl(mean))) %>% bind_rows-> fr_nonzero_data
+                map_dbl(mean))-> fr_nonzero_data
   
   
-fr_nonzero_data %>% mutate(n_nodes=as.factor(n_nodes)) %>% ggplot(aes(lambda,fr_nonzero, color=n_nodes, group=n_nodes)) + geom_line() +  theme_minimal()
+fr_nonzero_data %>% ggplot(aes(lambda,fr_nonzero)) + geom_line() +  theme_minimal()
+
 ```
+
+We're still going with lambda = 5.0
 
 ```{r}
-require(bench)
-
-
-golden_lambda <- 5
-
-bm <- future_map(seq(from=100,to=500,by=100), 
-      ~proc.time({
-        sample(str_subset(tbl_vars(genexpr_cnv), '^TCGA'), size = n_nodes, replace = F) %>% {select(genexpr_cnv,.)} -> df_data
-        
-        sparsebnUtils::sparsebnData(df_data, type ="cont") ->dat
-        
-        nn <- sparsebnUtils::num.samples(dat) # number of samples in the dataset / equivalent to nrow(dat$data)
-        cnv_columns <- str_subset(tbl_vars(df_data), 'cnv$')
-        geneexpr_columns <-str_subset(tbl_vars(df_data),  'geneexpr$')
-        blacklist <- bind_rows(cross(list(a=cnv_columns,b=cnv_columns)),cross(list(a=geneexpr_columns,b=geneexpr_columns))) %>% as.matrix
-        cov_exprcnv <- sparsebn::estimate.covariance(dat, blacklist=blacklist, lambdas=golden_lambda)
-      }))
+cov_exprcnv[which(lambda==5)]
 ```
-
 
