@@ -1,0 +1,125 @@
+---
+title: "survival"
+author: "Corlene"
+date: "June 9, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# load libraries
+library(survival)
+library(survminer)
+library(dplyr)
+library(OIsurv) # Aumatically loads KMsurv
+library(ranger)
+library(tidyverse)
+library(ggplot2)
+
+```
+
+## Load data
+
+```{r load data, include=FALSE}
+
+Lung_Phenotype_Metadata <- read_delim("~/data/Lung_Phenotype_Metadata.txt", 
+    "\t", escape_double = FALSE, trim_ws = TRUE)
+
+```
+
+## Analysis
+
+
+```{r data prep, echo=FALSE}
+
+phenotype <- Lung_Phenotype_Metadata %>% 
+  rename(time_to_overall_survival_days = `Time To Overall Survival (Days)`,
+         overall_survival_status = `Overall Survival Status`,
+         age_at_diagnosis = `Age At Diagnosis (Years)`,
+         new_tumor_event = `New Tumor Event`,
+         new_tumor_event_type = `New Tumor Event Type`) %>% 
+# ****************************************************************************************** treatment should also include radiation theraphy
+  mutate(treatment = `Drug Therapy Type`,
+         treatment_factor = treatment,
+         gender_factor = Gender,
+         phenotype$new_tumor_event,
+         diagnosis_factor = Diagnosis, 
+# ****************************************************************************************** is 50 the correct age here?  
+         age_group = ifelse(age_at_diagnosis >=50, "old", "young")) # dichotomize continuous to binary values
+
+# factorise variables
+phenotype$age_group <- factor(phenotype$age_group)
+phenotype$treatment_factor <- factor(phenotype$treatment_factor)
+phenotype$diagnosis_factor <- factor(phenotype$diagnosis_factor)
+phenotype$gender_factor <- factor(phenotype$gender_factor)
+phenotype$new_tumor_event <- factor(phenotype$new_tumor_event)
+phenotype$new_tumor_event_type <- factor(phenotype$new_tumor_event_type)
+
+therapy_drug <- phenotype %>% 
+  distinct(`Drug Therapy Type`)
+
+therapy_radiation <- phenotype %>% 
+  distinct(`Radiation Therapy`)
+
+therapy <- phenotype %>% 
+  group_by(`Drug Therapy Type`,`Radiation Therapy`) %>% 
+  summarise(amount = n())
+
+sampleid <- Lung_Phenotype_Metadata %>% 
+  distinct(SampleID)
+
+patientid <- Lung_Phenotype_Metadata %>% 
+  distinct(SampleID)
+
+```
+
+
+
+```{r histogram, echo=FALSE} 
+
+hist(phenotype$age_at_diagnosis)
+
+```
+
+
+
+```{r plot, echo=FALSE}
+
+ggplot(data = phenotype) + 
+  geom_smooth(mapping = aes(x = time_to_overall_survival_days, y = age_at_diagnosis, colour = `Diagnosis`))
+
+```
+
+
+
+```{r kaplan-meier curves, echo=FALSE}
+
+## response variable 
+# Time To Overall Survival (Days): Time to death or censoring time from diagnosis
+
+# create a survival object
+surv_object <- Surv(time = phenotype$time_to_overall_survival_days, 
+                    event = phenotype$overall_survival_status)
+
+# fit the Kaplan-Meier curves
+fit1 <- survfit(surv_object ~ treatment, data = phenotype)
+summary(fit1)
+
+# plot the survival curve, including the p-value of a log rank test
+ggsurvplot(fit1, data = phenotype, pval = TRUE)
+
+```
+
+
+
+
+```{r hazard ratio, echo=FALSE}
+
+# Fit a Cox proportional hazards model
+fit.coxph <- coxph(surv_object ~ gender_factor + diagnosis_factor + age_group + new_tumor_event + new_tumor_event_type, 
+                   data = phenotype)
+hazard_ratio <- ggforest(fit.coxph, data = phenotype)
+hazard_ratio
+
+```

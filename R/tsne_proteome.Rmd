@@ -12,11 +12,13 @@ require(tidyverse)
 
 ```{r load data, include=FALSE}
 
-files <- list.files('../data/', full.names = T, pattern = 'txt')
+files <- list.files('~/data/', full.names = T, pattern = 'txt')
 (data <- map(files,read_tsv, n_max = 100) %>% set_names(files))
 
-files <- list.files('../data/', full.names = T, pattern = 'txt')
+files <- list.files('~/data/', full.names = T, pattern = 'txt')
 (data <- map(files[6:7],read_tsv) %>% set_names(files[6:7]))
+
+Lung_Phenotype_Metadata <- data$Lung_Phenotype_Metadata
 
 Lung_Phenotype_Metadata <- read_delim("~/data/data_backup/Lung_Phenotype_Metadata.txt", 
     "\t", escape_double = FALSE, trim_ws = TRUE)
