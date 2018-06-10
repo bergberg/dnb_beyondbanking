@@ -92,19 +92,19 @@ pheno_subset <- semi_join(pheno,subset_full) %>% distinct(SampleID,.keep_all = T
 require(Rtsne)
 
 rtsne <- Rtsne(dstnc_mat, is_distance = T, dims = 2, perplexity = 2, theta = 0.01)
-saveRDS(rtsne, '../../data/intermediates/rtsne_50patients.rds')
+# saveRDS(rtsne, '../../data/intermediates/rtsne_50patients.rds')
 
 pheno_clust <- data_frame(Y1=rtsne$Y[,1],Y2=rtsne$Y[,2]) %>% bind_cols(pheno_subset)
-saveRDS(pheno_clust, '../../data/intermediates/pheno_clust.RDS')
+# saveRDS(pheno_clust, '../../data/intermediates/pheno_clust.RDS')
 
 pheno_clust %>% 
-  ggplot(aes(Y1,Y2))+geom_point(aes(color=`Vital Status`))
+  ggplot(aes(Y1,Y2))+geom_point(aes(color = 'Vital Status'))
 ```
 
 
 ```{r kaplan-meier curves, echo=FALSE}
 
-pheno_subset <- pheno_subset %>% 
+pheno_survival <- pheno_clust %>% 
   rename(time_to_overall_survival_days = `Time To Overall Survival (Days)`,
          overall_survival_status = `Overall Survival Status`,
          age_at_diagnosis = `Age At Diagnosis (Years)`,
@@ -119,34 +119,52 @@ pheno_subset <- pheno_subset %>%
          age_group = ifelse(age_at_diagnosis >=50, "old", "young")) # dichotomize continuous to binary values
 
 # factorise variables
-pheno_subset <- pheno_subset %>% 
+pheno_survival <- pheno_survival %>% 
   mutate_at(.vars = c("age_group", "treatment_factor", "gender_factor", "new_tumor_event", "new_tumor_event_type"), as.factor)
 
 ## response variable 
 # Time To Overall Survival (Days): Time to death or censoring time from diagnosis
 
+pheno_squamous <- pheno_survival %>% 
+  filter(Diagnosis == 'Lung Squamous Cell Carcinoma')
+
 # create a survival object
-surv_object <- Surv(time = pheno_subset$time_to_overall_survival_days, 
-                    event = pheno_subset$overall_survival_status)
+surv_object <- Surv(time = pheno_squamous$time_to_overall_survival_days, 
+                    event = pheno_squamous$overall_survival_status)
 
 # fit the Kaplan-Meier curves
-fit1 <- survfit(surv_object ~ treatment*, data = pheno_subset)
+fit1 <- survfit(surv_object ~ treatment, data = pheno_squamous)
 summary(fit1)
 
 # plot the survival curve, including the p-value of a log rank test
-ggsurvplot(fit1, data = pheno_subset, pval = TRUE)
+ggsurvplot(fit1, data = pheno_squamous, pval = TRUE)
 
 ```
 
+```{r kaplan-meier curves 2, echo=FALSE} 
 
+pheno_adeno <- pheno_survival %>% 
+  filter(Diagnosis == 'Lung Adenocarcinoma')
 
+# create a survival object
+surv_object <- Surv(time = pheno_adeno$time_to_overall_survival_days, 
+                    event = pheno_adeno$overall_survival_status)
+
+# fit the Kaplan-Meier curves
+fit1 <- survfit(surv_object ~ treatment, data = pheno_adeno)
+summary(fit1)
+
+# plot the survival curve, including the p-value of a log rank test
+ggsurvplot(fit1, data = pheno_adeno, pval = TRUE)
+
+```
 
 ```{r hazard ratio, echo=FALSE}
 
 # Fit a Cox proportional hazards model
-fit.coxph <- coxph(surv_object ~ gender_factor + diagnosis_factor + age_group + new_tumor_event + new_tumor_event_type, 
-                   data = pheno_subset)
-hazard_ratio <- ggforest(fit.coxph, data = pheno_subset)
+fit.coxph <- coxph(surv_object ~ Y1*Y2 + gender_factor + diagnosis_factor + age_group + new_tumor_event_type, 
+                   data = pheno_survival)
+hazard_ratio <- ggforest(fit.coxph, data = pheno_survival)
 hazard_ratio
 
 ```
