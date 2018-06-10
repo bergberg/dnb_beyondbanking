@@ -7,26 +7,138 @@
 require(tidyverse)
 require(fst)
 require(furrr)
+require(sparsebn)
+require(tidyr)
+require(dplyr)
+library(data.table)
+library(dplyr)
+library(stringr)
+
+
 ```
 
-# join gene expr and mut data
+
+```{r}
+Lung_CNV <- read_fst('../../data/startset/Lung_CNV.txt.fst') %>% as_data_frame
+Lung_Methylation <- read_fst('../../data/startset/Lung_Methylation.txt.fst') %>% as_data_frame
+Lung_Methylation = Lung_Methylation  %>% mutate(Gene = sub(',.*','', Gene))
+
+# remove duplicates from CNV
+ind.duplicate = duplicated(Lung_CNV %>% select(Gene, Chr))
+
+# remove rows with NA (genes with no location)
+Lung_CNV = Lung_CNV[!ind.duplicate,] %>% na.omit() %>% as_data_frame
+```
+
+
+# Create Methylation data set. Aggregate by Gene/Chr (average)
+
+```{r}
+
+# size of interval for each gene
+M = 10000
+
+head(Lung_CNV)
+
+
+
+# create data frame with interval for each gene_chr
+gene_start_stop = 
+  Lung_CNV %>% 
+  select(Chr, Gene, Start, Stop) %>% 
+  mutate(Gene_Start = Start, Gene_Stop = Stop) %>% 
+  select(-c(Start,Stop)) %>% 
+  mutate(Gene_Start_Int = Gene_Start - M, Gene_Stop_Int = Gene_Stop + M) %>% 
+  as_data_frame
+
+head(gene_start_stop)
+
+# get probe_location
+probe_location = 
+  Lung_Methylation %>% select(probeID, Chr, Gene, Start) %>% 
+  mutate(Gene = sub(',.*','', Gene)) %>% 
+  as_data_frame
+
+head(probe_location)
+
+
+# remove NAs
+probe_location = probe_location %>% na.omit() %>% as_data_frame()
+sum(is.na(probe_location$Start))
+
+# join CNV gene location, and probe location
+join = inner_join(gene_start_stop, probe_location, by = c("Chr", "Gene")) %>% as_data_frame 
+
+head(join)
+
+# Find probes within gene interval
+join_true =  join[(join$Start > join$Gene_Start_Int & join$Start < join$Gene_Stop_Int),] %>% as_data_frame()
+
+# Select probes within gene interval
+
+
+Lung_Methylation_Sig = Lung_Methylation %>% filter(probeID %in% join_true$probeID) %>% as_data_frame()
+Lung_Methylation_Sig = Lung_Methylation_Sig %>% select(-c(Start, Strand, Stop, Relation_CpG_Island, probeID))
+
+head(Lung_Methylation_Sig)
+
+ind.na = (rowSums(is.na(Lung_Methylation_Sig %>% select(-c(Chr, Gene)))) == 907)
+Lung_Methylation_Sig = Lung_Methylation_Sig[!ind.na,]
+
+
+
+head(Lung_Methylation_Sig)
+
+
+
+# get Average methylation level in each gene_chr
+Lung_Methylation_Avg = Lung_Methylation_Sig %>% group_by(Chr, Gene) %>% summarize_at(.vars = vars(starts_with('TCGA')), .funs = mean, na.rm=TRUE) %>% as.data.frame
+
+
+Lung_Methylation_Avg = Lung_Methylation_Avg %>% mutate(Gene_Chr = str_c(Gene,"_",Chr)) %>% select(-c(Chr, Gene))
+Lung_Methylation_Avg = Lung_Methylation_Avg %>% as_data_frame()
+head(Lung_Methylation_Avg)
+
+#check
+sum(is.na(Lung_Methylation_Avg))
+
+# 
+Lung_Methylation_Avg_t <- Lung_Methylation_Avg %>% 
+  gather(SampleID,methyl, starts_with('TCGA')) %>% 
+  spread(Gene_Chr,methyl)
+
+head(Lung_Methylation_Avg_t)
+
+write_fst(Lung_Methylation_Avg_t, "C:/Users/Robert/Documents/data/intermediates/Lung_Methylation_Transposed.fst")
+
+
+``` 
+
+
+
+
+
+# create top1000 data frames and graphs between DNA layers (CNV, Mutation, Methylation) and RNA layer (Gene expression)
 
 ```{r paged.print=TRUE}
 
 Lung_GeneExpression <- read_fst("../../data/intermediates/Lung_GeneExpression_normal.fst") %>% as_data_frame
 Lung_Mutation <- read_fst("../../data/startset/Lung_Mutation.txt.fst") %>% as_data_frame
+Lung_Methylation <- read_fst("../../data/intermediates/Lung_Methylation_Transposed.fst") %>% as_data_frame
+
+#Lung_CNV <- read_fst("../../data/intermediates/Lung_CNV_Transposed.fst") %>% as_data_frame
+#Lung_miRNA <- read_fst("../../data/startset/Lung_miRNA.txt.fst") %>% as_data_frame
 
 
-head(Lung_GeneExpression)
-head(Lung_Mutation)
 
 
 Lung_Mutation_Transposed = 
   Lung_Mutation %>%
-  group_by(Sample_ID, Gene, Chr) %>% 
+  rename(SampleID = Sample_ID) %>% 
+  group_by(SampleID, Gene, Chr) %>% 
   summarise(count = n()) %>% 
   as_data_frame() %>% 
-  gather(Sample_ID, value = count, starts_with("TCGA")) %>%
+  gather(SampleID, value = count, starts_with("TCGA")) %>%
   as_data_frame %>% 
   tidyr::unite(Gene_Chr, Gene,Chr) %>%
   spread(Gene_Chr,count) %>% 
@@ -34,79 +146,171 @@ Lung_Mutation_Transposed =
 
 Lung_Mutation_Transposed[is.na(Lung_Mutation_Transposed)] = 0
 
+colnames(Lung_GeneExpression) = c("SampleID" , str_c(colnames(Lung_GeneExpression)[-1],"_gen"))
+colnames(Lung_Mutation_Transposed) = c("SampleID", str_c(colnames(Lung_Mutation_Transposed)[-1],"_mut"))
+colnames(Lung_Methylation) = c("SampleID", str_c(colnames(Lung_Methylation)[-1],"_myt"))
+# colnames(Lung_CNV) = c("SampleID", str_c(colnames(Lung_CNV)[-1],"_cnv"))
 
-
-
-rm(Lung_Mutation)
 ```
 
 
-
-```{r}
-
-colnames(Lung_Mutation_Transposed) = 
-  c("Sample_ID" ,str_c(colnames(Lung_Mutation_Transposed[,-1]), "_mut"))
-
-
-colnames(Lung_GeneExpression) = 
-  c("Sample_ID" ,str_c(colnames(Lung_GeneExpression[,-1]), "_gen"))
+```{r select vars} 
+var_mut = apply(Lung_Mutation_Transposed[,-1], 2, sd)
+var_gen = apply(Lung_GeneExpression[,-1], 2, sd)
+var_myt = apply(Lung_Methylation[,-1],2,sd)
+var_cnv = apply(Lung_CNV[,-1],2,sd)
 
 
-head(Lung_Mutation_Transposed)
-head(Lung_GeneExpression)
-
-genexpr_mut <- inner_join(Lung_Mutation_Transposed, Lung_GeneExpression, by = "Sample_ID")
-
-#variation per column
-zero_var = which(apply(genexpr_mut[,-1], 2, sd)==0) + 1 
-gen_zero_var = genexpr_mut[,zero_var]
-genexpr_mut = genexpr_mut[,-zero_var]
+vars_mut = names(sort(var_mut, decreasing = TRUE)[1:1000])
+vars_gen = names(sort(var_gen, decreasing = TRUE)[1:1000])
+vars_myt = names(sort(var_myt, decreasing = TRUE)[1:1000])
+vars_cnv = names(sort(var_cnv, decreasing = TRUE)[1:1000])
 
 
-head(genexpr_mut)
+Lung_Mutation_1000 = Lung_Mutation_Transposed %>% select(SampleID, vars_mut)
+Lung_GeneExpression_1000 = Lung_GeneExpression %>% select(SampleID, vars_gen)
+Lung_Methylation_1000 = Lung_Methylation %>% select(SampleID, vars_myt)
+Lung_CNV_1000 = Lung_CNV %>% select(SampleID, vars_cnv)
 
-rm(Lung_GeneExpression)
-rm(Lung_Mutation_Transposed)
 ```
 
-# correlation networks
+```{r settings for graph}
+# create blacklist, NO LINKS inside same data set
+blacklist <- 
+  rbind(
+    expand.grid(1:1000,1:1000),
+    expand.grid(1001:2000,1001:2000)
+  ) %>% as.matrix
 
+``` 
+
+
+
+# Generate Methyl -> RNA
 ```{r}
-
-
-require(sparsebn)
-smpl <- genexpr_mut[,sample(2:(ncol(genexpr_mut)), 10000)]
-head(smpl)
-
+X = Lung_Methylation_1000
+Y = Lung_GeneExpression_1000
+df_data = inner_join(X,Y, by = "SampleID")
 
 golden_lambda = 5
- 
-dat <- sparsebnUtils::sparsebnData(smpl, type ="continuous")
+dat <- sparsebnUtils::sparsebnData(df_data[,-1], type ="continuous")
 nn <- sparsebnUtils::num.samples(dat) # number of samples in the dataset / equivalent to nrow(dat$data)
+cov_expr_methyl <- 
+  sparsebn::estimate.covariance(
+    dat, 
+    blacklist=blacklist, 
+    lambdas=golden_lambda
+  )
 
-mut_columns <- str_subset(tbl_vars(smpl), '_mut$')
-geneexpr_columns <-str_subset(tbl_vars(smpl), '_gen$')
+saveRDS(
+  cor_expr_methyl,
+  file="C:/Users/Robert/Documents/data/cor_expr_methyl.rds"
+)
 
-blacklist <- bind_rows(cross(list(a=mut_columns,b=mut_columns)),cross(list(a=geneexpr_columns,b=geneexpr_columns))) %>% as.matrix
-cov_expr_mut <- sparsebn::estimate.dag(dat, blacklist=blacklist, lambdas=golden_lambda)
+saveRDS(
+  Lung_Methylation_1000, 
+  file="C:/Users/Robert/Documents/data/Lung_Methylation_1000.rds"
+)
+
+
 ```
 
+# Generate Mutation -> RNA
 ```{r}
-cov_expr_mut
+X = Lung_Mutation_1000
+Y = Lung_GeneExpression_1000
+df_data = inner_join(X,Y, by = "SampleID")
 
+golden_lambda = 5
+dat <- sparsebnUtils::sparsebnData(df_data[,-1], type ="continuous")
+nn <- sparsebnUtils::num.samples(dat) # number of samples in the dataset / equivalent to nrow(dat$data)
+cov_expr_mut <- 
+  sparsebn::estimate.covariance(
+    dat, 
+    blacklist=blacklist, 
+    lambdas=golden_lambda
+  )
 
-g = graph_from_adjacency_matrix(cov_exprmut[[1]]>0, mode = 'directed')
-plot(g)
+saveRDS(
+  cor_expr_mut,
+  file="C:/Users/Robert/Documents/data/cor_expr_mut.rds"
+)
+
+saveRDS(
+  Lung_Mutation_1000, 
+  file="C:/Users/Robert/Documents/data/Lung_Mutation_1000.rds"
+)
+
 
 ```
 
 
-```{r plot non-zero coefficients}
-data_frame(lambda=lambdas[-2:-1], 
-           fr_nonzero = cov_exprcnv %>% map(as.vector) %>% map(`>`,0) %>% map_dbl(mean)) %>% 
-  ggplot(aes(lambda,fr_nonzero)) + geom_line() + geom_smooth() + theme_minimal()
+# Generate CNV -> RNA
+```{r}
+X = Lung_CNV_1000
+Y = Lung_GeneExpression_1000
+df_data = inner_join(X,Y, by = "SampleID")
+
+golden_lambda = 5
+dat <- sparsebnUtils::sparsebnData(df_data[,-1], type ="continuous")
+nn <- sparsebnUtils::num.samples(dat) # number of samples in the dataset / equivalent to nrow(dat$data)
+cov_expr_cnv <- 
+  sparsebn::estimate.covariance(
+    dat, 
+    blacklist=blacklist, 
+    lambdas=golden_lambda
+  )
+
+saveRDS(
+  cor_expr_cnv,
+  file="C:/Users/Robert/Documents/data/cor_expr_cnv.rds"
+)
+
+saveRDS(
+  Lung_CNV_1000, 
+  file="C:/Users/Robert/Documents/data/Lung_CNV_1000.rds"
+)
 
 
 ```
+
+
+
+
+
+<!-- # correlation networks -->
+
+<!-- ```{r} -->
+
+
+
+
+
+<!-- golden_lambda = 5 -->
+
+<!-- dat <- sparsebnUtils::sparsebnData(df_data[,-1], type ="continuous") -->
+<!-- nn <- sparsebnUtils::num.samples(dat) # number of samples in the dataset / equivalent to nrow(dat$data) -->
+
+
+<!-- blacklist <-  -->
+<!--   rbind( -->
+<!--     expand.grid(1:1000,1:1000), -->
+<!--     expand.grid(1001:2000,1001:2000) -->
+<!--   ) %>% as.matrix -->
+<!-- cov_expr_mut <- sparsebn::estimate.covariance(dat, blacklist=blacklist, lambdas=golden_lambda) -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+
+
+
+<!-- cor_MYT = cov_expr_mut -->
+<!-- saveRDS(cor_MYT,file="C:/Users/Robert/Documents/data/cor_MYT.rds") -->
+<!-- saveRDS(Lung_Methylation_1000, file="C:/Users/Robert/Documents/data/Lung_Methylation_1000.rds") -->
+
+
+
+
+<!-- ``` -->
 
 
