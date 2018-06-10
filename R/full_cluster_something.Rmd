@@ -5,6 +5,13 @@ output: html_notebook
 
 ```{r setup}
 set.seed(12322)
+require(furrr)
+require(tidyverse)
+require(fst)
+library(survival)
+library(survminer)
+plan(multiprocess)
+
 ```
 
 
@@ -12,15 +19,22 @@ load cov matrices
 ```{r}
 cov_cnvexpr <- readRDS('../../data/intermediates/cov_exprcnv.rds')
 cov_mutexpr <- readRDS('../../data/intermediates/cor_MUT.rds') 
+cov_methexpr <- readRDS('../../data/intermediates/cor_MYT.rds')
 ```
 
 
 Build full cov matr
 
 ```{r}
-nl_mtr <- matrix(0,ncol=1000,nrow=1000)
-b <- cbind(nl_mtr, cov_mutexpr[[1]][1:1000,1001:2000])
-cov_full <- cbind(rbind(cov_mutexpr[[1]][1:1000,1:1000],t(b)), rbind(b,cov_cnvexpr))
+
+b <- cbind(matrix(0,ncol=1000,nrow=1000), cov_mutexpr[[1]][1:1000,1001:2000])
+d <- cbind(rbind(cov_mutexpr[[1]][1:1000,1:1000],t(b)), rbind(b,cov_cnvexpr))
+
+x <- rbind(matrix(0,ncol=1000,nrow=2000), cov_methexpr[[1]][1001:2000,1:1000])
+
+cov_full <- sparsebnUtils::as.sparse(cbind( rbind(cov_methexpr[[1]][1:1000,1:1000], x),rbind(t(x), d)))
+
+
 cov_full_inv = solve(cov_full)
 
 ```
@@ -28,26 +42,21 @@ cov_full_inv = solve(cov_full)
 Join data
 
 ```{r}
-cnv_genexpr <- read_fst('../../data/intermediates/genexpr_cnv.fst')
+cnv_genexpr <- read_fst('../../data/intermediates/genexpr_cnv.fst') %>% as_data_frame
 mut_genexpr <- readRDS('../../data/intermediates/Lung_Mutation_1000.rds')
-data_full <- inner_join(mut_genexpr,cnv_genexpr, by = "SampleID")
+meth_genexpr <- readRDS('../../data/intermediates/Lung_Methylation_1000.rds')
+data_full <- reduce(list(meth_genexpr,mut_genexpr,cnv_genexpr),inner_join, by = "SampleID")
+
+pheno <- read_fst('../../data/Lung/Lung_Phenotype_Metadata.txt.fst') %>% as_data_frame
+
 ```
 
 
 ```{r}
-
-#cov_full, data_full
-
-
-
-
 #take subset of n_patients
-n_patients = 100
-subset_patients = sample(1:992, n_patients)
+n_patients = 250
+subset_patients = sample(1:nrow(data_full), n_patients)
 subset_full = data_full[subset_patients,]
-
-
-
 ```
 
 
@@ -61,30 +70,84 @@ iprd <- expand.grid(1:nrow(subset_full_nested),1:nrow(subset_full_nested))
 rw <- subset_full_nested$data
 
 # prd <- cross_df(genexpr_cnv_nested$data, genexpr_cnv_nested$data)
-dstnc <- map2_dbl(iprd[,1],iprd[,2],~as.double(tcrossprod( (rw[[..1]]-rw[[..2]]) %*% cov_full_inv, (rw[[..1]]-rw[[..2]]))))
+dstnc <- future_map2_dbl(iprd[,1],iprd[,2],~as.double(tcrossprod( (rw[[..1]]-rw[[..2]]) %*% cov_full_inv, (rw[[..1]]-rw[[..2]]))))
+# dstnc <- map2_dbl(iprd[,1][1:10],iprd[,2][1:10],~as.double(mahalanobis(rw[[..1]], rw[[..2]], cov_full_inv, inverted=TRUE)))
+
 dstnc_mat <- matrix(dstnc,ncol=n_patients,nrow=n_patients)
 
 
 ```
 
 ```{r}
-saveRDS(dstnc_mat, '../../data/intermediates/dstnc_mat_50.rds')
+saveRDS(dstnc_mat, '../../data/intermediates/dstnc_mat_250.rds')
 
 ```
 
 
 ```{r}
+pheno_subset <- semi_join(pheno,subset_full) %>% distinct(SampleID,.keep_all = T)
+```
+
+```{r}
 require(Rtsne)
 
-rtsne <- Rtsne(dstnc_mat, is_distance = T, dims = 2, perplexity = 1, theta = 0.5, partial_pca = T)
-# saveRDS(rtsne, '../../data/intermediates/rtsne_50patients.rds')
-plot(rtsne$Y[,1],rtsne$Y[,2])
+rtsne <- Rtsne(dstnc_mat, is_distance = T, dims = 2, perplexity = 2, theta = 0.01)
+saveRDS(rtsne, '../../data/intermediates/rtsne_50patients.rds')
+
+pheno_clust <- data_frame(Y1=rtsne$Y[,1],Y2=rtsne$Y[,2]) %>% bind_cols(pheno_subset)
+saveRDS(pheno_clust, '../../data/intermediates/pheno_clust.RDS')
+
+pheno_clust %>% 
+  ggplot(aes(Y1,Y2))+geom_point(aes(color=`Vital Status`))
+```
+
+
+```{r kaplan-meier curves, echo=FALSE}
+
+pheno_subset <- pheno_subset %>% 
+  rename(time_to_overall_survival_days = `Time To Overall Survival (Days)`,
+         overall_survival_status = `Overall Survival Status`,
+         age_at_diagnosis = `Age At Diagnosis (Years)`,
+         new_tumor_event = `New Tumor Event`,
+         new_tumor_event_type = `New Tumor Event Type`) %>% 
+# ****************************************************************************************** treatment should also include radiation theraphy
+  mutate(treatment = `Drug Therapy Type`,
+         treatment_factor = treatment,
+         gender_factor = Gender,
+         diagnosis_factor = Diagnosis, 
+# ****************************************************************************************** is 50 the correct age here?  
+         age_group = ifelse(age_at_diagnosis >=50, "old", "young")) # dichotomize continuous to binary values
+
+# factorise variables
+pheno_subset <- pheno_subset %>% 
+  mutate_at(.vars = c("age_group", "treatment_factor", "gender_factor", "new_tumor_event", "new_tumor_event_type"), as.factor)
+
+## response variable 
+# Time To Overall Survival (Days): Time to death or censoring time from diagnosis
+
+# create a survival object
+surv_object <- Surv(time = pheno_subset$time_to_overall_survival_days, 
+                    event = pheno_subset$overall_survival_status)
+
+# fit the Kaplan-Meier curves
+fit1 <- survfit(surv_object ~ treatment*, data = pheno_subset)
+summary(fit1)
+
+# plot the survival curve, including the p-value of a log rank test
+ggsurvplot(fit1, data = pheno_subset, pval = TRUE)
+
 ```
 
 
 
 
+```{r hazard ratio, echo=FALSE}
 
+# Fit a Cox proportional hazards model
+fit.coxph <- coxph(surv_object ~ gender_factor + diagnosis_factor + age_group + new_tumor_event + new_tumor_event_type, 
+                   data = pheno_subset)
+hazard_ratio <- ggforest(fit.coxph, data = pheno_subset)
+hazard_ratio
 
-
+```
 
