@@ -12,52 +12,92 @@ require(furrr)
 # join gene expr and mut data
 
 ```{r paged.print=TRUE}
-a = 10
-files <- list.files('../../data/Lung', full.names = T, pattern = 'txt$')
-files <- set_names(files, str_replace(basename(files), '.txt',''))
-files_fst <-  map(files,str_c,'.fst')
-Lung_GeneExpression <- read_fst(files_fst$Lung_GeneExpression) %>% as_data_frame
-Lung_GeneExpression_transposed <- Lung_GeneExpression %>% 
-  gather(SampleID, value = gene_expression, starts_with("TCGA")) %>% select(Gene,Chr,gene_expression,SampleID) %>%
-  tidyr::unite(gene_chr, Gene,Chr) %>% 
-  distinct(SampleID, gene_chr,.keep_all=TRUE)
-Lung_CNV <- read_fst(files_fst$Lung_CNV) %>% as_data_frame
-Lung_CNV_transposed <- Lung_CNV %>% 
-  gather(SampleID, value = cnv, starts_with("TCGA")) %>% select(Gene,Chr,cnv,SampleID) %>%
-  tidyr::unite(gene_chr, Gene,Chr) %>% 
-  distinct(SampleID, gene_chr,.keep_all=TRUE)
+
+Lung_GeneExpression <- read_fst("../../data/intermediates/Lung_GeneExpression_normal.fst") %>% as_data_frame
+Lung_Mutation <- read_fst("../../data/startset/Lung_Mutation.txt.fst") %>% as_data_frame
+
+
+head(Lung_GeneExpression)
+head(Lung_Mutation)
+
+
+Lung_Mutation_Transposed = 
+  Lung_Mutation %>%
+  group_by(Sample_ID, Gene, Chr) %>% 
+  summarise(count = n()) %>% 
+  as_data_frame() %>% 
+  gather(Sample_ID, value = count, starts_with("TCGA")) %>%
+  as_data_frame %>% 
+  tidyr::unite(Gene_Chr, Gene,Chr) %>%
+  spread(Gene_Chr,count) %>% 
+  as_data_frame
+
+Lung_Mutation_Transposed[is.na(Lung_Mutation_Transposed)] = 0
+
+
+
+
+rm(Lung_Mutation)
 ```
 
 
 
 ```{r}
-genexpr_cnv <- 
-  inner_join(
-    select(Lung_CNV,Gene,Chr,starts_with('TCGA')),
-    select(Lung_GeneExpression,Gene,Chr,starts_with('TCGA')), by = c("Gene","Chr"), suffix = c('.cnv','.geneexpr'))
 
-# genexpr_cnv <- 
-# mutate_at(genexpr_cnv, .vars=vars(starts_with("TCGA")), as.double)
+colnames(Lung_Mutation_Transposed) = 
+  c("Sample_ID" ,str_c(colnames(Lung_Mutation_Transposed[,-1]), "_mut"))
 
-# write_fst(genexpr_cnv, '../../data/intermediates/genexpr_cnv_join.fst' )
+
+colnames(Lung_GeneExpression) = 
+  c("Sample_ID" ,str_c(colnames(Lung_GeneExpression[,-1]), "_gen"))
+
+
+head(Lung_Mutation_Transposed)
+head(Lung_GeneExpression)
+
+genexpr_mut <- inner_join(Lung_Mutation_Transposed, Lung_GeneExpression, by = "Sample_ID")
+
+#variation per column
+zero_var = which(apply(genexpr_mut[,-1], 2, sd)==0) + 1 
+gen_zero_var = genexpr_mut[,zero_var]
+genexpr_mut = genexpr_mut[,-zero_var]
+
+
+head(genexpr_mut)
+
+rm(Lung_GeneExpression)
+rm(Lung_Mutation_Transposed)
 ```
 
 # correlation networks
 
 ```{r}
-smpl <- sample(str_subset(tbl_vars(genexpr_cnv), '^TCGA'), size = 1000, replace = F)
-genexpr_cnv_sel <- select(genexpr_cnv,smpl) 
-dat <- sparsebnUtils::sparsebnData(genexpr_cnv_sel, type ="continuous")
-nn <- sparsebnUtils::num.samples(dat) # number of samples in the dataset / equivalent to nrow(dat$data)
-lambdas <- sparsebnUtils::generate.lambdas(sqrt(nn), 0.001, lambdas.length = 100, scale = "linear")
 
-cnv_columns <- str_subset(tbl_vars(genexpr_cnv_sel), 'cnv$')
-geneexpr_columns <-str_subset(tbl_vars(genexpr_cnv_sel), 'geneexpr$')
-whitelist <- cross_df(list(cnv=cnv_columns,geneexpr=geneexpr_columns)) %>% as.matrix
+
+require(sparsebn)
+smpl <- genexpr_mut[,sample(2:(ncol(genexpr_mut)), 10000)]
+head(smpl)
+
+
+golden_lambda = 5
+ 
+dat <- sparsebnUtils::sparsebnData(smpl, type ="continuous")
+nn <- sparsebnUtils::num.samples(dat) # number of samples in the dataset / equivalent to nrow(dat$data)
+
+mut_columns <- str_subset(tbl_vars(smpl), '_mut$')
+geneexpr_columns <-str_subset(tbl_vars(smpl), '_gen$')
+
+blacklist <- bind_rows(cross(list(a=mut_columns,b=mut_columns)),cross(list(a=geneexpr_columns,b=geneexpr_columns))) %>% as.matrix
+cov_expr_mut <- sparsebn::estimate.dag(dat, blacklist=blacklist, lambdas=golden_lambda)
 ```
 
 ```{r}
-cov_exprcnv <- sparsebn::estimate.covariance(dat, whitelist=whitelist, lambdas=lambdas)
+cov_expr_mut
+
+
+g = graph_from_adjacency_matrix(cov_exprmut[[1]]>0, mode = 'directed')
+plot(g)
+
 ```
 
 

@@ -1,0 +1,90 @@
+---
+title: "Full covariance matrix"
+output: html_notebook
+---
+
+```{r setup}
+set.seed(12322)
+```
+
+
+load cov matrices
+```{r}
+cov_cnvexpr <- readRDS('../../data/intermediates/cov_exprcnv.rds')
+cov_mutexpr <- readRDS('../../data/intermediates/cor_MUT.rds') 
+```
+
+
+Build full cov matr
+
+```{r}
+nl_mtr <- matrix(0,ncol=1000,nrow=1000)
+b <- cbind(nl_mtr, cov_mutexpr[[1]][1:1000,1001:2000])
+cov_full <- cbind(rbind(cov_mutexpr[[1]][1:1000,1:1000],t(b)), rbind(b,cov_cnvexpr))
+cov_full_inv = solve(cov_full)
+
+```
+
+Join data
+
+```{r}
+cnv_genexpr <- read_fst('../../data/intermediates/genexpr_cnv.fst')
+mut_genexpr <- readRDS('../../data/intermediates/Lung_Mutation_1000.rds')
+data_full <- inner_join(mut_genexpr,cnv_genexpr, by = "SampleID")
+```
+
+
+```{r}
+
+#cov_full, data_full
+
+
+
+
+#take subset of n_patients
+n_patients = 100
+subset_patients = sample(1:992, n_patients)
+subset_full = data_full[subset_patients,]
+
+
+
+```
+
+
+
+
+
+
+```{r}
+subset_full %>% group_by(SampleID) %>% nest %>% mutate(data=map(data, as.matrix))-> subset_full_nested
+iprd <- expand.grid(1:nrow(subset_full_nested),1:nrow(subset_full_nested))
+rw <- subset_full_nested$data
+
+# prd <- cross_df(genexpr_cnv_nested$data, genexpr_cnv_nested$data)
+dstnc <- map2_dbl(iprd[,1],iprd[,2],~as.double(tcrossprod( (rw[[..1]]-rw[[..2]]) %*% cov_full_inv, (rw[[..1]]-rw[[..2]]))))
+dstnc_mat <- matrix(dstnc,ncol=n_patients,nrow=n_patients)
+
+
+```
+
+```{r}
+saveRDS(dstnc_mat, '../../data/intermediates/dstnc_mat_50.rds')
+
+```
+
+
+```{r}
+require(Rtsne)
+
+rtsne <- Rtsne(dstnc_mat, is_distance = T, dims = 2, perplexity = 1, theta = 0.5, partial_pca = T)
+# saveRDS(rtsne, '../../data/intermediates/rtsne_50patients.rds')
+plot(rtsne$Y[,1],rtsne$Y[,2])
+```
+
+
+
+
+
+
+
+

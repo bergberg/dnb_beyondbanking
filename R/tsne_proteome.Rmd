@@ -26,6 +26,9 @@ Lung_Phenotype_Metadata <- read_delim("~/data/data_backup/Lung_Phenotype_Metadat
 Lung_Proteome <- read_delim("~/data/data_backup/Lung_Proteome.txt", 
     "\t", escape_double = FALSE, trim_ws = TRUE)
 
+Lung_Methylation <- read_delim("~/data/Lung_Methylation.txt", 
+    "\t", escape_double = FALSE, trim_ws = TRUE, n_max = 100)
+
 ```
 
 ```{r data prep, include=FALSE}
