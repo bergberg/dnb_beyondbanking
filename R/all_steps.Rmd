@@ -7,12 +7,10 @@
 require(tidyverse)
 require(fst)
 require(furrr)
-require(sparsebn)
 require(tidyr)
 require(dplyr)
 # library(data.table)
-library(dplyr)
-library(stringr)
+require(stringr)
 files <- list.files('../data/Lung', full.names = T, pattern = 'txt$') %>% 
   set_names(., str_replace(basename(.), '.txt',''))
 files_fst <- map(files,str_c,'.fst')
@@ -216,10 +214,10 @@ cov_mut_genexpr <-
     lambdas = golden_lambda
   )
 
-saveRDS(
-  cov_mut_genexpr,
-  file="../data/cov_mut_genexpr.rds"
-)
+# saveRDS(
+#   cov_mut_genexpr,
+#   file="../data/cov_mut_genexpr.rds"
+# )
 
 ```
 
@@ -232,7 +230,7 @@ blacklist <-
     expand.grid(1:n_sel_var_cnv,1:n_sel_var_gen),
     expand.grid((n_sel_var_cnv + 1):(n_sel_var_cnv + n_sel_var_gen),(n_sel_var_cnv + 1):(n_sel_var_cnv + n_sel_var_gen))
   ) %>% as.matrix
-cnv_genexpr <- sparsebnUtils::sparsebnData(cnv_genexpr[,-1], type ="continuous")
+cov_cnv_genexpr <- sparsebnUtils::sparsebnData(cnv_genexpr[,-1], type ="continuous")
 cov_cnv_genexpr <- 
   sparsebn::estimate.covariance(
     cnv_genexpr, 
@@ -240,13 +238,15 @@ cov_cnv_genexpr <-
     lambdas=golden_lambda
   )
 
-saveRDS(
-  cov_cnv_genexpr,
-  file="../data/cov_cnv_genexpr.rds"
-)
+# saveRDS(
+#   cov_cnv_genexpr,
+#   file="../data/cov_cnv_genexpr.rds"
+# )
 ```
 
 # Build full covariance matrix
+
+(unfinished from here on)
 
 ```{r}
 b <- cbind(matrix(0,ncol=1000,nrow=1000), cov_mut_genexpr[[1]][1:1000,1001:2000])
@@ -260,3 +260,62 @@ cov_full <- sparsebnUtils::as.sparse(cbind( rbind(cov_expr_methyl[[1]][1:1000,1:
 cov_full_inv = solve(cov_full)
 
 ```
+
+# Join data
+
+```{r}
+
+
+data_full <- reduce(list(meth_genexpr,mut_genexpr,cnv_genexpr),inner_join, by = "SampleID")
+
+```
+
+```{r}
+#take subset of n_patients
+n_patients = 250
+subset_patients = sample(1:nrow(data_full), n_patients)
+subset_full = data_full[subset_patients,]
+```
+
+
+
+
+
+
+```{r}
+subset_full %>% group_by(SampleID) %>% nest %>% mutate(data=map(data, as.matrix))-> subset_full_nested
+iprd <- expand.grid(1:nrow(subset_full_nested),1:nrow(subset_full_nested))
+rw <- subset_full_nested$data
+
+# prd <- cross_df(genexpr_cnv_nested$data, genexpr_cnv_nested$data)
+dstnc <- future_map2_dbl(iprd[,1],iprd[,2],~as.double(tcrossprod( (rw[[..1]]-rw[[..2]]) %*% cov_full_inv, (rw[[..1]]-rw[[..2]]))))
+# dstnc <- map2_dbl(iprd[,1][1:10],iprd[,2][1:10],~as.double(mahalanobis(rw[[..1]], rw[[..2]], cov_full_inv, inverted=TRUE)))
+
+dstnc_mat <- matrix(dstnc,ncol=n_patients,nrow=n_patients)
+
+
+```
+
+```{r}
+saveRDS(dstnc_mat, '../../data/intermediates/dstnc_mat_250.rds')
+
+```
+
+
+```{r}
+pheno_subset <- semi_join(pheno,subset_full) %>% distinct(SampleID,.keep_all = T)
+```
+
+```{r}
+require(Rtsne)
+
+rtsne <- Rtsne(dstnc_mat, is_distance = T, dims = 2, perplexity = 2, theta = 0.01)
+# saveRDS(rtsne, '../../data/intermediates/rtsne_50patients.rds')
+
+pheno_clust <- data_frame(Y1=rtsne$Y[,1],Y2=rtsne$Y[,2]) %>% bind_cols(pheno_subset)
+# saveRDS(pheno_clust, '../../data/intermediates/pheno_clust.RDS')
+
+pheno_clust %>% 
+  ggplot(aes(Y1,Y2))+geom_point(aes(color = 'Vital Status'))
+```
+
