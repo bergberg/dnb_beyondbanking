@@ -1,0 +1,12 @@
+body{
+   background-image: url('figures/Frontpage_powerpoint_tr.PNG');
+   /*min-height: 300px;*/
+   /*max-width: 1000px;*/
+    /* Set background image to fixed (don't scroll along with the page) */
+    background-attachment: fixed;
+    background-position: center top;
+    /* Set the background image to no repeat */
+    background-repeat: no-repeat;
+    /* Scale the background image to be as large as possible */
+    /*background-size: cover;*/
+}

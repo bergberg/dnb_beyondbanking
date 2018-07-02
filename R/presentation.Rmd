@@ -1,35 +1,93 @@
 ---
-title: A sparse Bayesian covariance metric for clustering multi-omic data with t-distributed
+title: A sparse Bayesian covariance metric for reducing multi-omic data with t-distributed
   stochastic neighbor embeddings
 author: "DNB Data Science"
-date: "6/10/2018"
 output: 
   revealjs::revealjs_presentation:
     theme: white
     center: true
-    
+    transition: slide
+    css: custom.css
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## 99 Problems
+
+## Problem
  
  * lung cancer
  * treatment effectiveness?
- * complex data
+
+## Data {data-transition="slide-out fade-in"}
  
-## Data
+![layers](figures/Omics_layers.PNG)
+
+## Data {data-transition="fade"}
  
   * genomic (DNA)
   * transcriptomic (RNA)
-  * (proteimoic)
+  * proteomic (proteins)
   * clinical (treatments outcomes)
+
+## Data {data-transition="fade"}
+
+  * genomic (DNA)
+  * transcriptomic (RNA)
+  * ~~proteomic (proteins)~~
+  * ~~clinical (treatments outcomes)~~
   
-## 99 + 1 Problems
+## Challenges
   
    * complex data
-   * #features $\gg$ #observations
-   * clinical data not sufficient
+   * nr of features $\gg$ nr of observations
+   * clinical data quality not sufficient to model
+   
+Can we learn structure from multi-omic data?
+
+## Proposal
+   
+   1. link different data to gene level
+   1. estimate connection between layers
+   1. dimension reduction
+   
+## Step 1: covariance
+
+
+<img src="figures/image.PNG" alt="graphs" style="height:300px">
+
+  * covariance matrices between layers ... 
+  * ... using sparse Bayesian estimation
+
+## Step 2: distance
+
+<img src="figures/Matrix.PNG" alt="graphs" style="height:350px">
+
+  blockwise sparse covariance $\rightarrow$ distance matrix
+
+## Step 3: dimension reduction
+
+<img src="figures/image_2.png" alt="graphs" style="height:350px">
+
+
+ t-distributed stochastic neighbour embedding
+ 
+  * on 1000 most variable features per block only
+
+## Discussion {.smaller}
+
+*Advantages*
+
+ * take into account all of gene-level data
+   + scalable approach
+ * sparse estimation suitable for $p\gg n$ data
+ * dimension reduction 
+   + based on network structure
+   + focus on important features
+
+*Disadvantages*
+ 
+ * discards some prior info on data structure
+ * assumes blockwise independence network structure 
    
