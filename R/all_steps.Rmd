@@ -1,0 +1,262 @@
+---
+  title: "gene expr - mut"
+  output: html_notebook
+---
+  
+```{r setup}
+require(tidyverse)
+require(fst)
+require(furrr)
+require(sparsebn)
+require(tidyr)
+require(dplyr)
+# library(data.table)
+library(dplyr)
+library(stringr)
+files <- list.files('../data/Lung', full.names = T, pattern = 'txt$') %>% 
+  set_names(., str_replace(basename(.), '.txt',''))
+files_fst <- map(files,str_c,'.fst')
+```
+
+
+```{r parameters}
+# nr lines read from files (for testing)
+n_lines <- 1000L
+
+# size of 'active' interval [gene_start - M/2, gene_start + M/2] for each gene
+M <- 10000
+
+# number of most variable variables selected per layer
+n_sel_var <- 1000
+
+# sparsity
+golden_lambda <- 5
+
+
+```
+
+# Data preparation
+
+## Methylation data
+
+```{r}
+Lung_CNV <- read_fst(files_fst$Lung_CNV, to = n_lines) %>% as_data_frame
+Lung_Methylation <- read_fst(files_fst$Lung_Methylation, to = n_lines) %>% as_data_frame %>% 
+  # mutate(Gene = str_remove(Gene,'[,/!@#$%^&*()-]')) %>%  # remove invalid variable name characters
+  distinct
+  
+
+# remove rows with NA (e.g. genes with no location)
+Lung_CNV <- Lung_CNV %>% drop_na() 
+```
+
+Create Methylation data set. Aggregate by Gene/Chr (average) over 'active' interval gene start - M/2 to gene start + M/2
+
+```{r}
+# get probe_location
+probe_location <-  
+  Lung_Methylation %>% select(probeID, Chr, Gene, Start)  %>% 
+  drop_na() %>% 
+  mutate(Gene = sub(',.*','', Gene)) # create valid variable names
+
+# join CNV gene location, and probe location
+probe_gene_loc <- inner_join(
+  Lung_CNV %>% select(Chr, Gene, Gene_Start = Start, Gene_Stop = Stop), 
+  probe_location, 
+  by = c("Chr", "Gene")) %>% 
+  filter(Start > Gene_Start - M/2, Start < Gene_Stop + M/2)
+
+# Select probes within gene interval
+
+Lung_Methylation_Avg <- Lung_Methylation %>% 
+  filter(probeID %in% probe_gene_loc$probeID) %>% 
+  select(Chr, Gene, starts_with("TCGA")) %>% 
+  drop_na(starts_with("TCGA")) %>% 
+# get Average methylation level in each gene_chr
+  group_by(Chr, Gene) %>% 
+  summarize_at(.vars = vars(starts_with('TCGA')), .funs = mean, na.rm = TRUE) %>% 
+  unite("gene_chr", Gene,Chr,sep = "_", remove = TRUE)
+# 
+Lung_Methylation_Avg_t <- Lung_Methylation_Avg %>% 
+  gather(SampleID,methyl, starts_with('TCGA')) %>% 
+  spread(gene_chr,methyl) %>% 
+  rename_at(.vars = vars(-SampleID), .funs = str_c,"_methyl")
+
+# files_fst$Lung_Methylation_t <- str_replace(basename(files_fst$Lung_Methylation), '([.].*)', '_t\\1')
+# write_fst(Lung_Methylation_Avg_t, files_fst$Lung_Methylation_t)
+``` 
+
+## Gene expression data
+
+```{r paged.print=TRUE}
+Lung_GeneExpression_t <- read_fst(files_fst$Lung_GeneExpression, to = n_lines ) %>% as_data_frame %>% 
+  gather(SampleID, value = gene_expression, starts_with("TCGA")) %>% 
+  select(Gene,Chr,gene_expression,SampleID) %>%
+  tidyr::unite(gene_chr, Gene,Chr) %>% 
+  distinct(SampleID, gene_chr,.keep_all = TRUE) %>% 
+  spread(gene_chr,gene_expression)  %>% 
+  rename_at(.vars = vars(-SampleID), .funs = str_c,"_geneexpr")
+
+#Lung_CNV <- read_fst("../../data/intermediates/Lung_CNV_t.fst") %>% as_data_frame
+#Lung_miRNA <- read_fst("../../data/startset/Lung_miRNA.txt.fst") %>% as_data_frame
+```
+
+## Mutation data
+
+Simply count the number of mutations per gene/chr 
+
+```{r lung mutation data}
+Lung_Mutation <- read_fst(files_fst$Lung_Mutation, to = n_lines) %>% as_data_frame
+Lung_Mutation_t <-  
+  Lung_Mutation %>%
+  rename(SampleID = Sample_ID) %>% 
+  drop_na(SampleID) %>% 
+  count(SampleID, Gene, Chr) %>% 
+  gather(SampleID, value = n, starts_with("TCGA")) %>%
+  unite(gene_chr, Gene,Chr) %>%
+  spread(gene_chr,n, fill = 0) %>%
+  rename_at(.vars = vars(-SampleID), .funs = str_c,"_mut")
+```
+
+## CNV data
+
+```{r}
+Lung_CNV_t <-
+  Lung_CNV %>% 
+  gather(SampleID, value = cnv, starts_with("TCGA")) %>% 
+  select(Gene,Chr,cnv,SampleID) %>%
+  tidyr::unite(gene_chr, Gene,Chr) %>% 
+  distinct(SampleID, gene_chr,.keep_all = TRUE) %>% 
+  spread(gene_chr,cnv)  %>% 
+  rename_at(.vars = vars(-SampleID), .funs = str_c,"_cnv")
+```
+
+# Dataset reduction heuristic
+
+Create top1000 data frames
+
+```{r select vars} 
+var_mut <- apply(select(Lung_Mutation_t,-SampleID), 2, sd)
+var_gen <- apply(select(Lung_GeneExpression_t, -SampleID), 2, sd)
+var_meth <- apply(select(Lung_Methylation_Avg_t, -SampleID),2,sd)
+var_cnv <- apply(select(Lung_CNV_t, -SampleID),2,sd)
+
+n_sel_var_mut <- min(length(var_mut), n_sel_var)
+n_sel_var_gen <- min(length(var_gen), n_sel_var)
+n_sel_var_meth <- min(length(var_meth), n_sel_var)
+n_sel_var_cnv <- min(length(var_cnv), n_sel_var)
+
+vars_mut <- names(sort(var_mut, decreasing = TRUE)[1:n_sel_var_mut])
+vars_gen <- names(sort(var_gen, decreasing = TRUE)[1:n_sel_var_gen])
+vars_meth <- names(sort(var_meth, decreasing = TRUE)[1:n_sel_var_meth])
+vars_cnv <- names(sort(var_cnv, decreasing = TRUE)[1:n_sel_var_cnv])
+
+
+Lung_Mutation_t_sel <- Lung_Mutation_t %>% select(SampleID, vars_mut)
+Lung_GeneExpression_t_sel <- Lung_GeneExpression_t %>% select(SampleID, vars_gen)
+Lung_Methylation_t_sel <- Lung_Methylation_Avg_t %>% select(SampleID, vars_meth)
+Lung_CNV_t_sel <- Lung_CNV_t %>% select(SampleID, vars_cnv)
+```
+
+
+# Covariance matrix
+
+Sparse covariance between DNA layers (CNV, Mutation, Methylation) and RNA layer (Gene expression)
+
+
+```{r settings for graph}
+# create blacklist, NO LINKS inside same data set
+
+
+``` 
+
+
+
+# Generate Methyl -> RNA
+```{r}
+blacklist <- 
+  rbind(
+    expand.grid(1:n_sel_var_meth,1:n_sel_var_gen),
+    expand.grid((n_sel_var_meth + 1):(n_sel_var_meth + n_sel_var_gen),(n_sel_var_meth + 1):(n_sel_var_meth + n_sel_var_gen))
+  ) %>% as.matrix
+
+
+meth_genexpr <- inner_join(Lung_Methylation_t_sel,Lung_GeneExpression_t_sel, by = "SampleID")
+
+# golden_lambda <- 5
+meth_genexpr_sparse <- sparsebnUtils::sparsebnData(meth_genexpr[,-1], type ="continuous")
+cov_expr_methyl <- 
+  sparsebn::estimate.covariance(
+    meth_genexpr_sparse, 
+    blacklist = blacklist, 
+    lambdas = golden_lambda
+  )
+
+saveRDS(
+  cov_expr_methyl,
+  file= "../data/cov_expr_methyl.rds"
+)
+```
+
+# Generate Mutation -> RNA
+```{r}
+
+mut_genexpr <-  inner_join(Lung_Mutation_t_sel,Lung_GeneExpression_t_sel, by = "SampleID")
+blacklist <- 
+  rbind(
+    expand.grid(1:n_sel_var_mut,1:n_sel_var_gen),
+    expand.grid((n_sel_var_mut + 1):(n_sel_var_mut + n_sel_var_gen),(n_sel_var_mut + 1):(n_sel_var_mut + n_sel_var_gen))
+  ) %>% as.matrix
+
+mut_genexpr_sparse <- sparsebnUtils::sparsebnData(mut_genexpr[,-1], type ="continuous")
+cov_mut_genexpr <- 
+  sparsebn::estimate.covariance(
+    mut_genexpr_sparse, 
+    blacklist = blacklist, 
+    lambdas = golden_lambda
+  )
+
+saveRDS(
+  cov_mut_genexpr,
+  file="../data/cov_mut_genexpr.rds"
+)
+
+```
+
+
+# Generate CNV -> RNA
+```{r}
+cnv_genexpr <-  inner_join(Lung_CNV_t_sel,Lung_GeneExpression_t_sel, by = "SampleID")
+blacklist <- 
+  rbind(
+    expand.grid(1:n_sel_var_cnv,1:n_sel_var_gen),
+    expand.grid((n_sel_var_cnv + 1):(n_sel_var_cnv + n_sel_var_gen),(n_sel_var_cnv + 1):(n_sel_var_cnv + n_sel_var_gen))
+  ) %>% as.matrix
+cnv_genexpr <- sparsebnUtils::sparsebnData(cnv_genexpr[,-1], type ="continuous")
+cov_cnv_genexpr <- 
+  sparsebn::estimate.covariance(
+    cnv_genexpr, 
+    blacklist=blacklist, 
+    lambdas=golden_lambda
+  )
+
+saveRDS(
+  cov_cnv_genexpr,
+  file="../data/cov_cnv_genexpr.rds"
+)
+```
+
+# Build full covariance matrix
+
+```{r}
+b <- cbind(matrix(0,ncol=1000,nrow=1000), cov_mut_genexpr[[1]][1:1000,1001:2000])
+d <- cbind(rbind(cov_mut_genexpr[[1]][1:1000,1:1000],t(b)), rbind(b,cov_cnv_genexpr))
+
+x <- rbind(matrix(0,ncol=1000,nrow=2000), cov_expr_methyl[[1]][1001:2000,1:1000])
+
+cov_full <- sparsebnUtils::as.sparse(cbind( rbind(cov_expr_methyl[[1]][1:1000,1:1000], x),rbind(t(x), d)))
+
+
+cov_full_inv = solve(cov_full)
+
+```
