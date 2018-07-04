@@ -1,5 +1,5 @@
 ---
-title: A sparse Bayesian covariance metric for reducing multi-omic data with t-distributed
+title: A sparse covariance metric for reducing multi-omic data with t-distributed
   stochastic neighbor embeddings
 author: "DNB Data Science"
 output: 
@@ -48,46 +48,80 @@ Can we learn structure from multi-omic data?
 
 ## Proposal
    
-   1. link different data to gene level
-   1. estimate connection between layers
-   1. dimension reduction
+ * Constrain / reduce data using prior knowledge / assumptions
+ * Estimate the sparse $p\times p$ covariance matrix $\Sigma$
+ * Construct a distance matrix $d(x,y) = (x-y)^{T}\Sigma^{-1}(x-y)$ with this
+ * use distance matrix for dimension reduction
+
+
+## Step 1: reduction (1)
+
+ 1. CNV data set: none
+ 1. Gene expression: none
+ 1. Mutation: count number of mutations per gene
+ 1. Methylation: average beta over probes at $[\text{gene start} - 5000, \text{gene start}  + 5000]$
+   + $\text{gene start}$ taken from CNV data set
+
+## Step 1: reduction (2)
+
+ 1. Take 1000 variables with highest variance per data set
+
+So pragmatic!
    
-## Step 1: covariance
+## Step 2: covariance
 
+Estimate sparse covariance matrices using the `sparsebn` package*
 
-<img src="figures/image.PNG" alt="graphs" style="height:300px">
+ * between layers (off-diagonal blocks)
+ * hyperparameter $\lambda$, the regularization parameter
 
-  * covariance matrices between layers ... 
-  * ... using sparse Bayesian estimation
+Fine-tune the regularization parameter on random subsets: $\lambda_\text{golden} = 5.0000$
+  
+*Aragam, B., Gu, J., and Zhou, Q. (2017). *Learning large-scale Bayesian networks with the sparsebn package*. arXiv: 1703.04025.
 
-## Step 2: distance
+## Step 2: covariance
 
 <img src="figures/Matrix.PNG" alt="graphs" style="height:350px">
 
-  blockwise sparse covariance $\rightarrow$ distance matrix
+off-diagonal blockwise sparse covariance $\rightarrow$ distance matrix
+
+## Step 3: distance
+
+Scale-invariant dissimilarity measure, "Mahalonobis distance" 
+
+ $d(x,y) = (x-y)^{T}\Sigma^{-1}(x-y)$
+
+Here, $x$ and $y$ are the length $p$  data vectors of any two patients.
 
 ## Step 3: dimension reduction
 
-<img src="figures/image_2.png" alt="graphs" style="height:350px">
+<img src="figures/image_2.png" alt="graphs" style="height:150px">
 
+ t-distributed stochastic neighbour embedding... yeah, that doesn't show much. Perhaps 
 
- t-distributed stochastic neighbour embedding
- 
-  * on 1000 most variable features per block only
+ * use all data
+ * multidimensional scaling instead of tsne
+ * ...
 
 ## Discussion {.smaller}
 
 *Advantages*
 
- * take into account all of gene-level data
-   + scalable approach
+ * use all of gene-level data
+ * simple, just linear algebra
  * sparse estimation suitable for $p\gg n$ data
  * dimension reduction 
-   + based on network structure
+   + based on linear 
    + focus on important features
 
 *Disadvantages*
  
  * discards some prior info on data structure
  * assumes blockwise independence network structure 
-   
+  
+## Speculation
+
+ * 'simple' multilevel hierarchical models
+ * regularized/Bayesian 
+ * How to combine prior information (pathways?) with data?
+

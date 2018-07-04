@@ -25,7 +25,7 @@ n_lines <- 1000L
 M <- 10000
 
 # number of most variable variables selected per layer
-n_sel_var <- 1000
+n_sel_var <- 100
 
 # sparsity
 golden_lambda <- 5
@@ -95,7 +95,7 @@ Lung_GeneExpression_t <- read_fst(files_fst$Lung_GeneExpression, to = n_lines ) 
   spread(gene_chr,gene_expression)  %>% 
   rename_at(.vars = vars(-SampleID), .funs = str_c,"_geneexpr")
 
-#Lung_CNV <- read_fst("../../data/intermediates/Lung_CNV_t.fst") %>% as_data_frame
+#Lung_CNV <- read_fst("../data/Lung_CNV_t.fst") %>% as_data_frame
 #Lung_miRNA <- read_fst("../../data/startset/Lung_miRNA.txt.fst") %>% as_data_frame
 ```
 
@@ -156,6 +156,18 @@ Lung_Methylation_t_sel <- Lung_Methylation_Avg_t %>% select(SampleID, vars_meth)
 Lung_CNV_t_sel <- Lung_CNV_t %>% select(SampleID, vars_cnv)
 ```
 
+```{r}
+data_list <- list(
+  mut = Lung_Mutation_t_sel,
+  cnv = Lung_CNV_t_sel,
+  meth = Lung_Methylation_t_sel,
+  gen = Lung_GeneExpression_t_sel
+)
+
+nblocks <- as.integer(length(data_list))
+```
+
+
 
 # Covariance matrix
 
@@ -168,91 +180,54 @@ Sparse covariance between DNA layers (CNV, Mutation, Methylation) and RNA layer 
 
 ``` 
 
-
-
-# Generate Methyl -> RNA
-```{r}
-blacklist <- 
-  rbind(
-    expand.grid(1:n_sel_var_meth,1:n_sel_var_gen),
-    expand.grid((n_sel_var_meth + 1):(n_sel_var_meth + n_sel_var_gen),(n_sel_var_meth + 1):(n_sel_var_meth + n_sel_var_gen))
-  ) %>% as.matrix
-
-
-meth_genexpr <- inner_join(Lung_Methylation_t_sel,Lung_GeneExpression_t_sel, by = "SampleID")
-
-# golden_lambda <- 5
-meth_genexpr_sparse <- sparsebnUtils::sparsebnData(meth_genexpr[,-1], type ="continuous")
-cov_expr_methyl <- 
-  sparsebn::estimate.covariance(
-    meth_genexpr_sparse, 
-    blacklist = blacklist, 
-    lambdas = golden_lambda
-  )
-
-saveRDS(
-  cov_expr_methyl,
-  file= "../data/cov_expr_methyl.rds"
-)
+```{r upper_sparse_cov}
+source('upper_sparse_cov.R', echo = TRUE)
 ```
 
-# Generate Mutation -> RNA
+# Make all upper cov blocks
+
 ```{r}
 
-mut_genexpr <-  inner_join(Lung_Mutation_t_sel,Lung_GeneExpression_t_sel, by = "SampleID")
-blacklist <- 
-  rbind(
-    expand.grid(1:n_sel_var_mut,1:n_sel_var_gen),
-    expand.grid((n_sel_var_mut + 1):(n_sel_var_mut + n_sel_var_gen),(n_sel_var_mut + 1):(n_sel_var_mut + n_sel_var_gen))
-  ) %>% as.matrix
+ncombs <- as.integer(choose(nblocks, 2))
+combs <- combn(1:nblocks,2) %>% t %>% split(1:nrow(.))
+names(combs) <- map_chr(combs, ~str_c(names(data_list)[.[[1]]], "_", names(data_list)[.[[2]]]))
 
-mut_genexpr_sparse <- sparsebnUtils::sparsebnData(mut_genexpr[,-1], type ="continuous")
-cov_mut_genexpr <- 
-  sparsebn::estimate.covariance(
-    mut_genexpr_sparse, 
-    blacklist = blacklist, 
-    lambdas = golden_lambda
-  )
-
-# saveRDS(
-#   cov_mut_genexpr,
-#   file="../data/cov_mut_genexpr.rds"
-# )
+upper_covs <- 
+  map(combs, 
+      ~upper_sparse_cov(data_list[[.[[1]]]], data_list[[.[[2]]]], lambda = golden_lambda))
 
 ```
 
+# Build full upper blockwise non-zero sparse covariance matrix
 
-# Generate CNV -> RNA
 ```{r}
-cnv_genexpr <-  inner_join(Lung_CNV_t_sel,Lung_GeneExpression_t_sel, by = "SampleID")
-blacklist <- 
-  rbind(
-    expand.grid(1:n_sel_var_cnv,1:n_sel_var_gen),
-    expand.grid((n_sel_var_cnv + 1):(n_sel_var_cnv + n_sel_var_gen),(n_sel_var_cnv + 1):(n_sel_var_cnv + n_sel_var_gen))
-  ) %>% as.matrix
-cov_cnv_genexpr <- sparsebnUtils::sparsebnData(cnv_genexpr[,-1], type ="continuous")
-cov_cnv_genexpr <- 
-  sparsebn::estimate.covariance(
-    cnv_genexpr, 
-    blacklist=blacklist, 
-    lambdas=golden_lambda
-  )
-
-# saveRDS(
-#   cov_cnv_genexpr,
-#   file="../data/cov_cnv_genexpr.rds"
-# )
+knitr::include_graphics('figures/Matrix.PNG')
 ```
 
-# Build full covariance matrix
-
-(unfinished from here on)
 
 ```{r}
-b <- cbind(matrix(0,ncol=1000,nrow=1000), cov_mut_genexpr[[1]][1:1000,1001:2000])
-d <- cbind(rbind(cov_mut_genexpr[[1]][1:1000,1:1000],t(b)), rbind(b,cov_cnv_genexpr))
+upper_full_matrix_list <- matrix(list(), nrow = nblocks, ncol = nblocks)
 
-x <- rbind(matrix(0,ncol=1000,nrow=2000), cov_expr_methyl[[1]][1001:2000,1:1000])
+block_inds <- map_int(combs, ~(.x[[1]]-1L)*ncombs+.x[[2]]-1L)
+
+for (i in 1:ncombs) {
+  upper_full_matrix_list[combs[[i]][[1]], combs[[i]][[2]]][[1]] <- upper_covs[[names(combs)[[i]]]]
+}
+
+nelem <- c(ncol(upper_full_matrix_list[[1,2]]), map_int(2:nblocks, ~ncol(upper_full_matrix_list[[1,.]])))
+
+emptys <- which(map_lgl(as.list(full_matrix_list), is_empty))
+
+
+### here
+
+for (i in 1:length(emptys)) {
+  upper_full_matrix_list[[i,i]] <- Matrix::Matrix(0,)
+}
+
+map(1:nblocks, ~reduce(upper_full_matrix_list[.,], Matrix::cbind2))
+
+
 
 cov_full <- sparsebnUtils::as.sparse(cbind( rbind(cov_expr_methyl[[1]][1:1000,1:1000], x),rbind(t(x), d)))
 
@@ -271,10 +246,10 @@ data_full <- reduce(list(meth_genexpr,mut_genexpr,cnv_genexpr),inner_join, by = 
 ```
 
 ```{r}
-#take subset of n_patients
+#take random subset of n_patients
 n_patients = 250
 subset_patients = sample(1:nrow(data_full), n_patients)
-subset_full = data_full[subset_patients,]
+data_full = data_full[subset_patients,]
 ```
 
 
@@ -283,11 +258,13 @@ subset_full = data_full[subset_patients,]
 
 
 ```{r}
-subset_full %>% group_by(SampleID) %>% nest %>% mutate(data=map(data, as.matrix))-> subset_full_nested
-iprd <- expand.grid(1:nrow(subset_full_nested),1:nrow(subset_full_nested))
-rw <- subset_full_nested$data
+data_full %>% group_by(SampleID) %>% nest %>% mutate(data=map(data, as.matrix)) -> data_full_nested
+iprd <- expand.grid(1:nrow(data_full_nested),1:nrow(data_full_nested))
+iprd
+rw <- data_full_nested$data
 
 # prd <- cross_df(genexpr_cnv_nested$data, genexpr_cnv_nested$data)
+
 dstnc <- future_map2_dbl(iprd[,1],iprd[,2],~as.double(tcrossprod( (rw[[..1]]-rw[[..2]]) %*% cov_full_inv, (rw[[..1]]-rw[[..2]]))))
 # dstnc <- map2_dbl(iprd[,1][1:10],iprd[,2][1:10],~as.double(mahalanobis(rw[[..1]], rw[[..2]], cov_full_inv, inverted=TRUE)))
 
@@ -297,8 +274,7 @@ dstnc_mat <- matrix(dstnc,ncol=n_patients,nrow=n_patients)
 ```
 
 ```{r}
-saveRDS(dstnc_mat, '../../data/intermediates/dstnc_mat_250.rds')
-
+# saveRDS(dstnc_mat, '../data/dstnc_mat_250.rds')
 ```
 
 
@@ -310,10 +286,10 @@ pheno_subset <- semi_join(pheno,subset_full) %>% distinct(SampleID,.keep_all = T
 require(Rtsne)
 
 rtsne <- Rtsne(dstnc_mat, is_distance = T, dims = 2, perplexity = 2, theta = 0.01)
-# saveRDS(rtsne, '../../data/intermediates/rtsne_50patients.rds')
+# saveRDS(rtsne, '../data/rtsne_50patients.rds')
 
 pheno_clust <- data_frame(Y1=rtsne$Y[,1],Y2=rtsne$Y[,2]) %>% bind_cols(pheno_subset)
-# saveRDS(pheno_clust, '../../data/intermediates/pheno_clust.RDS')
+# saveRDS(pheno_clust, '../data/pheno_clust.RDS')
 
 pheno_clust %>% 
   ggplot(aes(Y1,Y2))+geom_point(aes(color = 'Vital Status'))
